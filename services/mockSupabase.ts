@@ -324,7 +324,6 @@ class SupabaseService {
       if (updates.shop !== undefined) sessionUpdates.shop = updates.shop;
       if (updates.observations !== undefined) sessionUpdates.observations = updates.observations;
       if (updates.notFinishedReason !== undefined) sessionUpdates.not_finished_reason = updates.notFinishedReason;
-      if (updates.totalPausedTime !== undefined) sessionUpdates.total_paused_time = updates.totalPausedTime;
       
       // Atualiza a sessão principal
       const { error: sessionError } = await this.supabase
