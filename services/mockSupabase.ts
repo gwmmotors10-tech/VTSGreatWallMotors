@@ -1,4 +1,3 @@
-
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import { User, ParkingSpot, RequestPart, Vehicle, HistoryLog, ReworkSession, Role, HistoryCategory, ChatMessage, ProductionBatch, LineMessage } from '../types';
 import * as XLSX from 'xlsx';
@@ -255,24 +254,124 @@ class SupabaseService {
     const results: ReworkSession[] = [];
     for(const s of (sessions || [])) {
         const { data: mats } = await this.supabase.from('rework_materials').select('*').eq('session_id', s.id);
-        results.push({ id: s.id.toString(), vin: s.vin, user: s.user_name, startTime: s.start_time, endTime: s.end_time, status: s.status as any, defectsCount: s.defects_count, shop: s.shop, observations: s.observations, notFinishedReason: s.not_finished_reason, materials: (mats || []).map(m => ({ name: m.name, qty: m.qty })) });
+        results.push({ 
+          id: s.id.toString(), 
+          vin: s.vin, 
+          user: s.user_name, 
+          startTime: s.start_time, 
+          endTime: s.end_time, 
+          status: s.status as any, 
+          defectsCount: s.defects_count, 
+          shop: s.shop, 
+          observations: s.observations, 
+          notFinishedReason: s.not_finished_reason, 
+          materials: (mats || []).map(m => ({ name: m.name, qty: m.qty })),
+          totalPausedTime: s.total_paused_time || 0
+        });
     }
     return results;
   }
 
   async addRework(session: ReworkSession): Promise<void> {
-    const { data } = await this.supabase.from('rework_sessions').insert({ vin: session.vin, user_name: session.user, start_time: session.startTime, end_time: session.endTime, status: session.status, defects_count: session.defectsCount, shop: session.shop, observations: session.observations, not_finished_reason: session.notFinishedReason }).select().single();
-    if (data && session.materials.length > 0) await this.supabase.from('rework_materials').insert(session.materials.map(m => ({ session_id: data.id, name: m.name, qty: m.qty })));
+    const { data, error } = await this.supabase
+      .from('rework_sessions')
+      .insert({ 
+        id: session.id,
+        vin: session.vin, 
+        user_name: session.user, 
+        start_time: session.startTime, 
+        end_time: session.endTime, 
+        status: session.status, 
+        defects_count: session.defectsCount, 
+        shop: session.shop, 
+        observations: session.observations, 
+        not_finished_reason: session.notFinishedReason,
+        total_paused_time: session.totalPausedTime || 0
+      })
+      .select()
+      .single();
+    
+    if (error) {
+      console.error('Error adding rework session:', error);
+      throw error;
+    }
+    
+    if (data && session.materials && session.materials.length > 0) {
+      const materialsInsert = session.materials.map(m => ({ 
+        session_id: data.id, 
+        name: m.name, 
+        qty: m.qty 
+      }));
+      
+      const { error: matError } = await this.supabase
+        .from('rework_materials')
+        .insert(materialsInsert);
+      
+      if (matError) {
+        console.error('Error adding rework materials:', matError);
+      }
+    }
   }
 
   async updateRework(sessionId: string, updates: Partial<ReworkSession>): Promise<void> {
-    const dbUpdates: any = {};
-    if (updates.status) dbUpdates.status = updates.status;
-    if (updates.endTime) dbUpdates.end_time = updates.endTime;
-    if (updates.observations !== undefined) dbUpdates.observations = updates.observations;
-    if (updates.defectsCount !== undefined) dbUpdates.defects_count = updates.defectsCount;
-    
-    await this.supabase.from('rework_sessions').update(dbUpdates).eq('id', sessionId);
+    try {
+      // Primeiro, atualiza os dados principais da sessão
+      const sessionUpdates: any = {};
+      
+      if (updates.status !== undefined) sessionUpdates.status = updates.status;
+      if (updates.endTime !== undefined) sessionUpdates.end_time = updates.endTime;
+      if (updates.defectsCount !== undefined) sessionUpdates.defects_count = updates.defectsCount;
+      if (updates.shop !== undefined) sessionUpdates.shop = updates.shop;
+      if (updates.observations !== undefined) sessionUpdates.observations = updates.observations;
+      if (updates.notFinishedReason !== undefined) sessionUpdates.not_finished_reason = updates.notFinishedReason;
+      if (updates.totalPausedTime !== undefined) sessionUpdates.total_paused_time = updates.totalPausedTime;
+      
+      // Atualiza a sessão principal
+      const { error: sessionError } = await this.supabase
+        .from('rework_sessions')
+        .update(sessionUpdates)
+        .eq('id', sessionId);
+      
+      if (sessionError) {
+        console.error('Error updating rework session:', sessionError);
+        throw sessionError;
+      }
+      
+      // Se houver materiais para atualizar, remove os antigos e insere os novos
+      if (updates.materials !== undefined) {
+        // Remove todos os materiais existentes para esta sessão
+        const { error: deleteError } = await this.supabase
+          .from('rework_materials')
+          .delete()
+          .eq('session_id', sessionId);
+        
+        if (deleteError) {
+          console.error('Error deleting old materials:', deleteError);
+        }
+        
+        // Insere os novos materiais
+        if (updates.materials.length > 0) {
+          const materialsInsert = updates.materials.map(m => ({ 
+            session_id: sessionId, 
+            name: m.name, 
+            qty: m.qty 
+          }));
+          
+          const { error: insertError } = await this.supabase
+            .from('rework_materials')
+            .insert(materialsInsert);
+          
+          if (insertError) {
+            console.error('Error inserting new materials:', insertError);
+          }
+        }
+      }
+      
+      console.log(`Rework session ${sessionId} updated successfully`);
+    } catch (error) {
+      console.error('Error in updateRework:', error);
+      throw error;
+    }
   }
 
   async getBatches(): Promise<ProductionBatch[]> {
