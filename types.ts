@@ -98,7 +98,7 @@ export interface ReworkSession {
   observations: string;
   materials: ReworkMaterial[];
   notFinishedReason?: string;
-  totalPausedTime?: number; // Adicionado aqui
+  totalPausedTime?: number;
 }
 
 export interface ChatMessage {
