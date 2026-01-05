@@ -1,4 +1,3 @@
-
 export type Role = 
   | 'Reworker' 
   | 'Visitor' 
@@ -99,6 +98,7 @@ export interface ReworkSession {
   observations: string;
   materials: ReworkMaterial[];
   notFinishedReason?: string;
+  totalPausedTime?: number; // Adicionado aqui
 }
 
 export interface ChatMessage {
