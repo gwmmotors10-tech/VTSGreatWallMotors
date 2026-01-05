@@ -29,44 +29,68 @@ export default function Reworkers({ user, onBack }: Props) {
 
   useEffect(() => {
     const checkActiveSession = async () => {
-      const sess = await db.getReworks();
-      const myActive = sess.find(s => s.user === user.fullName && (s.status === 'IN_PROGRESS' || s.status === 'PAUSED'));
-      if (myActive) {
-        setActiveSession(myActive);
-        setIsRunning(myActive.status === 'IN_PROGRESS');
-        setIsPaused(myActive.status === 'PAUSED');
-        setSessionForm({
-          vin: myActive.vin,
-          shop: myActive.shop,
-          defectsCount: myActive.defectsCount,
-          observations: myActive.observations
-        });
-        setMaterials(myActive.materials);
+      try {
+        const sess = await db.getReworks();
+        const myActive = sess.find(s => 
+          s.user === user.fullName && 
+          (s.status === 'IN_PROGRESS' || s.status === 'PAUSED') &&
+          !s.endTime
+        );
+        
+        if (myActive) {
+          setActiveSession(myActive);
+          setIsRunning(myActive.status === 'IN_PROGRESS');
+          setIsPaused(myActive.status === 'PAUSED');
+          setSessionForm({
+            vin: myActive.vin,
+            shop: myActive.shop,
+            defectsCount: myActive.defectsCount,
+            observations: myActive.observations
+          });
+          setMaterials(myActive.materials || []);
+        } else {
+          // Se não houver sessão ativa, resetar tudo
+          setActiveSession(null);
+          setIsRunning(false);
+          setIsPaused(false);
+        }
+      } catch (error) {
+        console.error('Error checking active session:', error);
       }
     };
+    
     checkActiveSession();
     
     const interval = setInterval(() => {
-        if (!isPaused) setCurrentTime(Date.now());
+      setCurrentTime(Date.now());
     }, 1000);
+    
     return () => clearInterval(interval);
-  }, [isPaused]);
+  }, [user.fullName]);
 
   useEffect(() => {
     const fetchData = async () => {
+      try {
         const [users, sess] = await Promise.all([db.getUsers(), db.getReworks()]);
         setAllReworkers(users.filter(u => u.role === 'Reworker'));
-        setActiveSessionsList(sess.filter(s => s.status === 'IN_PROGRESS' || s.status === 'PAUSED'));
+        setActiveSessionsList(sess.filter(s => 
+          (s.status === 'IN_PROGRESS' || s.status === 'PAUSED') && !s.endTime
+        ));
+      } catch (error) {
+        console.error('Error fetching data:', error);
+      }
     };
 
-    if(canViewRealTime) {
-        fetchData();
-        const interval = setInterval(fetchData, 5000);
-        return () => clearInterval(interval);
+    if (canViewRealTime) {
+      fetchData();
+      const interval = setInterval(fetchData, 5000);
+      return () => clearInterval(interval);
     }
   }, [canViewRealTime]);
 
   const formatElapsedTime = (startTime: string) => {
+    if (!startTime) return "00:00:00";
+    
     const diff = currentTime - new Date(startTime).getTime();
     if (diff < 0) return "00:00:00";
     const totalSecs = Math.floor(diff / 1000);
@@ -77,21 +101,38 @@ export default function Reworkers({ user, onBack }: Props) {
   };
 
   const addMaterial = () => {
-      if(!newMaterial.name) return;
-      setMaterials([...materials, { ...newMaterial }]);
-      setNewMaterial({ name: '', qty: 1 });
+    if (!newMaterial.name.trim()) return;
+    setMaterials([...materials, { ...newMaterial }]);
+    setNewMaterial({ name: '', qty: 1 });
   };
 
   const removeMaterial = (index: number) => {
-      setMaterials(materials.filter((_, i) => i !== index));
+    setMaterials(materials.filter((_, i) => i !== index));
   };
 
   const startRepair = async () => {
-    if (!sessionForm.vin || sessionForm.vin.length !== 17) return alert('Enter valid VIN (17 chars)');
+    if (!sessionForm.vin || sessionForm.vin.length !== 17) {
+      alert('Enter valid VIN (17 characters)');
+      return;
+    }
     
-    const newSess: ReworkSession = {
+    // Verificar se já existe sessão ativa para este VIN
+    try {
+      const existingSessions = await db.getReworks();
+      const existingActiveSession = existingSessions.find(s => 
+        s.vin === sessionForm.vin && 
+        (s.status === 'IN_PROGRESS' || s.status === 'PAUSED') &&
+        !s.endTime
+      );
+      
+      if (existingActiveSession) {
+        alert(`This VIN is already being reworked by ${existingActiveSession.user}`);
+        return;
+      }
+      
+      const newSess: ReworkSession = {
         id: `sess-${Date.now()}`,
-        vin: sessionForm.vin,
+        vin: sessionForm.vin.toUpperCase(),
         user: user.fullName,
         startTime: new Date().toISOString(),
         status: 'IN_PROGRESS',
@@ -100,26 +141,64 @@ export default function Reworkers({ user, onBack }: Props) {
         observations: sessionForm.observations || '',
         materials: materials,
         totalPausedTime: 0
-    };
+      };
 
-    await db.addRework(newSess);
-    await db.updateUserStatus(user.username, 'ONLINE');
-    setActiveSession(newSess);
-    setIsRunning(true);
-    setIsPaused(false);
+      await db.addRework(newSess);
+      await db.updateUserStatus(user.username, 'ONLINE');
+      
+      setActiveSession(newSess);
+      setIsRunning(true);
+      setIsPaused(false);
+      
+      // Atualizar a lista se necessário
+      if (canViewRealTime) {
+        const updatedSessions = await db.getReworks();
+        setActiveSessionsList(updatedSessions.filter(s => 
+          (s.status === 'IN_PROGRESS' || s.status === 'PAUSED') && !s.endTime
+        ));
+      }
+    } catch (error) {
+      console.error('Error starting repair:', error);
+      alert('Error starting repair session. Please try again.');
+    }
   };
 
   const togglePause = async () => {
     if (!activeSession) return;
-    const newStatus = isPaused ? 'IN_PROGRESS' : 'PAUSED';
-    await db.updateRework(activeSession.id, { status: newStatus as any });
-    setIsPaused(!isPaused);
-    setIsRunning(isPaused);
+    
+    try {
+      const newStatus = isPaused ? 'IN_PROGRESS' : 'PAUSED';
+      
+      // Atualizar status no banco
+      await db.updateRework(activeSession.id, { 
+        status: newStatus 
+      });
+      
+      // Atualizar status do usuário
+      await db.updateUserStatus(
+        user.username, 
+        isPaused ? 'ONLINE' : 'ONLINE_PAUSED'
+      );
+      
+      // Atualizar estado local
+      setIsPaused(!isPaused);
+      setIsRunning(isPaused);
+      
+      // Atualizar sessão local
+      setActiveSession(prev => prev ? { 
+        ...prev, 
+        status: newStatus 
+      } : null);
+    } catch (error) {
+      console.error('Error toggling pause:', error);
+      alert('Error updating session status. Please try again.');
+    }
   };
 
   const finishRepair = async () => {
     if (!activeSession) return;
     
+    // Confirmação
     if (!window.confirm('Are you sure you want to finish this repair?')) {
       return;
     }
@@ -135,6 +214,7 @@ export default function Reworkers({ user, onBack }: Props) {
     }
     
     try {
+      // CRÍTICO: Usar updateRework para atualizar a sessão existente
       const updateData = {
         endTime: new Date().toISOString(),
         status: 'COMPLETED' as const,
@@ -150,12 +230,12 @@ export default function Reworkers({ user, onBack }: Props) {
       
       alert('Repair session completed and saved successfully!');
       
-      // Resetar todos os estados
+      // RESET COMPLETO para permitir novo VIN
       setActiveSession(null);
       setIsRunning(false);
       setIsPaused(false);
       setSessionForm({ 
-        vin: '', 
+        vin: '',  // ← VIN É LIMPO AQUI!
         shop: SHOPS[0],
         defectsCount: 0, 
         observations: '' 
@@ -273,7 +353,7 @@ export default function Reworkers({ user, onBack }: Props) {
             <div className="space-y-4 flex-1 overflow-auto custom-scrollbar pr-2">
                 {allReworkers.map(rw => {
                     const activeSess = activeSessionsList.find(s => s.user === rw.fullName);
-                    const isOnline = rw.reworkerStatus === 'ONLINE';
+                    const isOnline = rw.reworkerStatus === 'ONLINE' || rw.reworkerStatus === 'ONLINE_PAUSED';
                     return (
                         <div key={rw.id} className="bg-slate-950 p-5 rounded-3xl border border-slate-800 flex flex-col gap-4">
                             <div className="flex items-center justify-between">
