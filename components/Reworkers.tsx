@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect } from 'react';
 import { User, ReworkSession, SHOPS, ReworkMaterial } from '../types';
 import { db } from '../services/mockSupabase';
@@ -24,6 +23,10 @@ export default function Reworkers({ user, onBack }: Props) {
   const [isPaused, setIsPaused] = useState(false);
   const [currentTime, setCurrentTime] = useState(Date.now());
   
+  // Estados para gerenciar o tempo pausado
+  const [totalPausedTime, setTotalPausedTime] = useState(0);
+  const [pauseStartTime, setPauseStartTime] = useState<number | null>(null);
+  
   const [allReworkers, setAllReworkers] = useState<User[]>([]);
   const [activeSessionsList, setActiveSessionsList] = useState<ReworkSession[]>([]);
   const canViewRealTime = user.role === 'Admin' || user.permissions.includes('VIEW_REALTIME_STATUS');
@@ -43,12 +46,18 @@ export default function Reworkers({ user, onBack }: Props) {
           observations: myActive.observations
         });
         setMaterials(myActive.materials);
+        
+        // Se a sessão estava pausada, inicializar o tempo de pausa
+        if (myActive.status === 'PAUSED') {
+          setTotalPausedTime(myActive.totalPausedTime || 0);
+          setPauseStartTime(Date.now());
+        }
       }
     };
     checkActiveSession();
     
     const interval = setInterval(() => {
-        if (!isPaused) setCurrentTime(Date.now());
+      if (!isPaused) setCurrentTime(Date.now());
     }, 1000);
     return () => clearInterval(interval);
   }, [isPaused]);
@@ -68,9 +77,18 @@ export default function Reworkers({ user, onBack }: Props) {
   }, [canViewRealTime]);
 
   const formatElapsedTime = (startTime: string) => {
-    // Note: A full implementation with pause would track intervals. 
-    // This simple version uses the startTime vs currentTime logic.
-    const diff = currentTime - new Date(startTime).getTime();
+    let diff = currentTime - new Date(startTime).getTime();
+    
+    // Subtrair o tempo total em pausa
+    if (totalPausedTime > 0) {
+      diff -= totalPausedTime;
+    }
+    
+    // Se estiver pausado no momento, subtrair o tempo desde que pausou
+    if (pauseStartTime) {
+      diff -= (Date.now() - pauseStartTime);
+    }
+    
     if (diff < 0) return "00:00:00";
     const totalSecs = Math.floor(diff / 1000);
     const hours = Math.floor(totalSecs / 3600);
@@ -90,7 +108,15 @@ export default function Reworkers({ user, onBack }: Props) {
   };
 
   const startRepair = async () => {
-    if (!sessionForm.vin || sessionForm.vin.length !== 17) return alert('Enter valid VIN (17 chars)');
+    // Validação melhorada do VIN
+    if (!sessionForm.vin || sessionForm.vin.length !== 17) {
+      return alert('Enter valid VIN (17 characters)');
+    }
+    
+    const vinRegex = /^[A-HJ-NPR-Z0-9]{17}$/i;
+    if (!vinRegex.test(sessionForm.vin)) {
+      return alert('Invalid VIN format. Only letters and numbers allowed, excluding I, O, Q.');
+    }
     
     const newSess: ReworkSession = {
         id: `sess-${Date.now()}`,
@@ -101,7 +127,8 @@ export default function Reworkers({ user, onBack }: Props) {
         defectsCount: sessionForm.defectsCount || 0,
         shop: sessionForm.shop || SHOPS[0],
         observations: sessionForm.observations || '',
-        materials: materials
+        materials: materials,
+        totalPausedTime: 0
     };
 
     await db.addRework(newSess);
@@ -109,14 +136,37 @@ export default function Reworkers({ user, onBack }: Props) {
     setActiveSession(newSess);
     setIsRunning(true);
     setIsPaused(false);
+    setTotalPausedTime(0);
+    setPauseStartTime(null);
   };
 
   const togglePause = async () => {
     if (!activeSession) return;
-    const newStatus = isPaused ? 'IN_PROGRESS' : 'PAUSED';
-    await db.updateRework(activeSession.id, { status: newStatus as any });
-    setIsPaused(!isPaused);
-    setIsRunning(isPaused); // if was paused, isRunning becomes true
+    
+    if (isPaused) {
+      // Retomando da pausa
+      if (pauseStartTime) {
+        const newPausedTime = totalPausedTime + (Date.now() - pauseStartTime);
+        setTotalPausedTime(newPausedTime);
+        setPauseStartTime(null);
+        
+        // Atualizar o tempo total pausado no banco
+        await db.updateRework(activeSession.id, { 
+          status: 'IN_PROGRESS',
+          totalPausedTime: newPausedTime
+        });
+      }
+      setIsPaused(false);
+      setIsRunning(true);
+      await db.updateUserStatus(user.username, 'ONLINE');
+    } else {
+      // Pausando
+      setPauseStartTime(Date.now());
+      setIsPaused(true);
+      setIsRunning(false);
+      await db.updateRework(activeSession.id, { status: 'PAUSED' });
+      await db.updateUserStatus(user.username, 'ONLINE_PAUSED');
+    }
   };
 
   const finishRepair = async () => {
@@ -128,24 +178,40 @@ export default function Reworkers({ user, onBack }: Props) {
       reason = prompt('Reason for not finishing?') || 'Unknown';
     }
 
-    await db.addRework({
-      ...activeSession,
+    // Calcular tempo total pausado final
+    let finalPausedTime = totalPausedTime;
+    if (pauseStartTime) {
+      finalPausedTime += (Date.now() - pauseStartTime);
+    }
+
+    // CORREÇÃO PRINCIPAL: Atualizar a sessão existente
+    await db.updateRework(activeSession.id, {
       endTime: new Date().toISOString(),
       status: 'COMPLETED',
       defectsCount: sessionForm.defectsCount || 0,
-      shop: sessionForm.shop || '',
+      shop: sessionForm.shop || SHOPS[0],
       observations: sessionForm.observations || '',
       materials: materials,
-      notFinishedReason: reason
+      notFinishedReason: reason || null,
+      totalPausedTime: finalPausedTime
     });
     
     await db.updateUserStatus(user.username, 'OFFLINE');
 
     alert('Session Finished and Saved');
+    
+    // Resetar todos os estados
     setActiveSession(null);
     setIsRunning(false);
     setIsPaused(false);
-    setSessionForm({ vin: '', defectsCount: 0, observations: '' });
+    setTotalPausedTime(0);
+    setPauseStartTime(null);
+    setSessionForm({ 
+      vin: '', 
+      shop: SHOPS[0],
+      defectsCount: 0, 
+      observations: '' 
+    });
     setMaterials([]);
   };
 
@@ -194,20 +260,41 @@ export default function Reworkers({ user, onBack }: Props) {
              <div className="grid grid-cols-2 gap-4">
                 <div>
                    <label className="text-[10px] text-slate-500 font-bold mb-1 block uppercase tracking-widest">Defects Count</label>
-                   <input className="w-full bg-slate-950 p-4 rounded-2xl border border-slate-800 outline-none" type="number" value={sessionForm.defectsCount} onChange={e => setSessionForm({...sessionForm, defectsCount: parseInt(e.target.value)})} />
+                   <input 
+                     className="w-full bg-slate-950 p-4 rounded-2xl border border-slate-800 outline-none" 
+                     type="number" 
+                     value={sessionForm.defectsCount} 
+                     onChange={e => setSessionForm({...sessionForm, defectsCount: parseInt(e.target.value) || 0})} 
+                   />
                 </div>
                 <div className="bg-slate-950 p-4 rounded-2xl border border-slate-800 flex flex-col justify-center">
                     <span className="text-[10px] text-slate-500 font-bold uppercase tracking-widest">Active Materials</span>
                     <span className="text-xl font-black text-white">{materials.length} Items</span>
                 </div>
              </div>
-             <textarea className="w-full bg-slate-950 p-4 rounded-2xl border border-slate-800 h-24 outline-none" placeholder="Observations..." value={sessionForm.observations} onChange={e => setSessionForm({...sessionForm, observations: e.target.value})} />
+             <textarea 
+               className="w-full bg-slate-950 p-4 rounded-2xl border border-slate-800 h-24 outline-none" 
+               placeholder="Observations..." 
+               value={sessionForm.observations} 
+               onChange={e => setSessionForm({...sessionForm, observations: e.target.value})} 
+             />
              
              <div className="bg-slate-800/50 p-6 rounded-3xl border border-slate-700/50 space-y-4">
                 <h4 className="font-black text-xs uppercase tracking-widest text-slate-400">Material Inventory Log</h4>
                 <div className="flex gap-2">
-                    <input className="flex-1 bg-slate-950 p-3 rounded-xl border border-slate-800 text-sm" placeholder="Part Name..." value={newMaterial.name} onChange={e => setNewMaterial({...newMaterial, name: e.target.value})} />
-                    <input type="number" className="w-20 bg-slate-950 p-3 rounded-xl border border-slate-800 text-sm text-center" value={newMaterial.qty} onChange={e => setNewMaterial({...newMaterial, qty: parseInt(e.target.value)})} min={1} />
+                    <input 
+                      className="flex-1 bg-slate-950 p-3 rounded-xl border border-slate-800 text-sm" 
+                      placeholder="Part Name..." 
+                      value={newMaterial.name} 
+                      onChange={e => setNewMaterial({...newMaterial, name: e.target.value})} 
+                    />
+                    <input 
+                      type="number" 
+                      className="w-20 bg-slate-950 p-3 rounded-xl border border-slate-800 text-sm text-center" 
+                      value={newMaterial.qty} 
+                      onChange={e => setNewMaterial({...newMaterial, qty: parseInt(e.target.value) || 1})} 
+                      min={1} 
+                    />
                     <button onClick={addMaterial} className="bg-blue-600 px-4 rounded-xl hover:bg-blue-700"><Plus size={18}/></button>
                 </div>
                 <div className="space-y-2 max-h-32 overflow-auto pr-2 custom-scrollbar">
@@ -246,7 +333,7 @@ export default function Reworkers({ user, onBack }: Props) {
             <div className="space-y-4 flex-1 overflow-auto custom-scrollbar pr-2">
                 {allReworkers.map(rw => {
                     const activeSess = activeSessionsList.find(s => s.user === rw.fullName);
-                    const isOnline = rw.reworkerStatus === 'ONLINE';
+                    const isOnline = rw.reworkerStatus === 'ONLINE' || rw.reworkerStatus === 'ONLINE_PAUSED';
                     return (
                         <div key={rw.id} className="bg-slate-950 p-5 rounded-3xl border border-slate-800 flex flex-col gap-4">
                             <div className="flex items-center justify-between">
@@ -269,7 +356,9 @@ export default function Reworkers({ user, onBack }: Props) {
                                     </div>
                                     <div className="flex flex-col items-end text-right">
                                         <span className="text-[9px] text-slate-500 font-black uppercase">Duration {activeSess.status === 'PAUSED' && '(PAUSED)'}</span>
-                                        <span className={`text-sm font-mono font-black ${activeSess.status === 'PAUSED' ? 'text-yellow-500' : 'text-green-500'}`}>{formatElapsedTime(activeSess.startTime)}</span>
+                                        <span className={`text-sm font-mono font-black ${activeSess.status === 'PAUSED' ? 'text-yellow-500' : 'text-green-500'}`}>
+                                          {activeSess.startTime ? formatElapsedTime(activeSess.startTime) : '00:00:00'}
+                                        </span>
                                     </div>
                                 </div>
                             )}
