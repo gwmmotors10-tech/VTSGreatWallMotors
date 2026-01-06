@@ -1,0 +1,7 @@
+{
+  "name": "GWM VTS - Vehicle Traceability System",
+  "description": "A comprehensive dark-themed vehicle traceability system for production monitoring, quality control, and inventory management at GWM plants.",
+  "requestFramePermissions": [
+    "camera"
+  ]
+}
