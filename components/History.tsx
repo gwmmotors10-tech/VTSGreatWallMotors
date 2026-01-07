@@ -30,6 +30,17 @@ export default function History({ user, onBack }: Props) {
     }
   }, [canAccessHistory]);
 
+  const formatDateTime = (dateStr: string) => {
+    if (!dateStr) return '-';
+    const date = new Date(dateStr);
+    const day = String(date.getDate()).padStart(2, '0');
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const year = date.getFullYear();
+    const hours = String(date.getHours()).padStart(2, '0');
+    const minutes = String(date.getMinutes()).padStart(2, '0');
+    return `${day}/${month}/${year} ${hours}:${minutes}`;
+  };
+
   const handleExport = () => {
     let dataToExport = [];
     let fileName = "VTS_History";
@@ -50,7 +61,7 @@ export default function History({ user, onBack }: Props) {
       fileName = "FastRepair_Detailed_History";
       dataToExport = filterByDate(vehicles, 'createdAt').map(v => ({
         "VIN NUMBER": v.vin,
-        "DATA DE INCLUSAO": new Date(v.createdAt).toLocaleString(),
+        "DATA DE INCLUSAO": formatDateTime(v.createdAt),
         "MODEL": v.model,
         "COLOR": v.color,
         "ORIGIN": v.origin,
@@ -61,13 +72,40 @@ export default function History({ user, onBack }: Props) {
       }));
     } else if (activeTab === 'REWORKERS') {
       fileName = "Rework_History";
-      dataToExport = filterByDate(reworks, 'startTime');
+      dataToExport = filterByDate(reworks, 'startTime').map(r => ({
+        "Start Time": formatDateTime(r.startTime),
+        "End Time": r.endTime ? formatDateTime(r.endTime) : '-',
+        "VIN": r.vin,
+        "Responsible": r.user,
+        "Defects Count": r.defectsCount,
+        "Shop": r.shop,
+        "Status": r.status,
+        "Materials Used": r.materials.map(m => `${m.name} (x${m.qty})`).join(', '),
+        "Observations": r.observations
+      }));
     } else if (activeTab === 'SUPPLY_LINE' || activeTab === 'SUPPLY_REPAIR') {
       const type = activeTab === 'SUPPLY_LINE' ? 'LINE' : 'REPAIR';
       fileName = `Supply_${type}_History`;
-      dataToExport = filterByDate(requests.filter(r => r.type === type), 'requestedAt');
+      dataToExport = filterByDate(requests.filter(r => r.type === type), 'requestedAt').map(r => ({
+        "Data Requisição": formatDateTime(r.requestedAt),
+        "Requisitante": r.requester,
+        "Part Number": r.partNumber,
+        "Part Name": r.partName,
+        "Quantidade": r.quantity,
+        "Status": r.status,
+        "Aprovador": r.processedBy || '-',
+        "Data Aprovação": r.approvedAt ? formatDateTime(r.approvedAt) : '-',
+        "Batch Retirada": r.batchRetirada || '-',
+        "Case Retirada": r.caseRetirada || '-'
+      }));
     } else {
-      dataToExport = filterByDate(history.filter(h => activeTab === 'ALL' || h.category === activeTab), 'date');
+      dataToExport = filterByDate(history.filter(h => activeTab === 'ALL' || h.category === activeTab), 'date').map(h => ({
+        "Date": formatDateTime(h.date),
+        "User": h.user,
+        "Action": h.action,
+        "Category": h.category,
+        "Details": h.details
+      }));
     }
 
     if (dataToExport.length === 0) return alert("No data found for selected range/tab.");
@@ -94,7 +132,7 @@ export default function History({ user, onBack }: Props) {
            <tbody className="divide-y divide-slate-800 text-sm">
               {reworks.map(r => (
                 <tr key={r.id} className="hover:bg-slate-800/50 transition-colors">
-                   <td className="p-4">{new Date(r.startTime).toLocaleString()}</td>
+                   <td className="p-4">{formatDateTime(r.startTime)}</td>
                    <td className="p-4 font-mono text-blue-400">{r.vin}</td>
                    <td className="p-4 font-bold">{r.user}</td>
                    <td className="p-4">{r.defectsCount}</td>
@@ -125,7 +163,7 @@ export default function History({ user, onBack }: Props) {
               {vehicles.map(v => (
                 <tr key={v.vin} className="hover:bg-slate-800/50 transition-colors">
                    <td className="p-4 font-mono font-black text-white tracking-widest">{v.vin}</td>
-                   <td className="p-4 text-slate-500 font-medium">{new Date(v.createdAt).toLocaleString()}</td>
+                   <td className="p-4 text-slate-500 font-medium">{formatDateTime(v.createdAt)}</td>
                    <td className="p-4 font-bold">
                       <div className="text-white">{v.model}</div>
                       <div className="text-slate-500 font-black">{v.color}</div>
@@ -161,7 +199,7 @@ export default function History({ user, onBack }: Props) {
                 <tr key={r.id} className="hover:bg-slate-800/50 transition-colors">
                    <td className="p-4">
                       <div className="font-bold">{r.requester}</div>
-                      <div className="text-slate-500">{new Date(r.requestedAt).toLocaleString()}</div>
+                      <div className="text-slate-500">{formatDateTime(r.requestedAt)}</div>
                    </td>
                    <td className="p-4">
                       <div className="font-mono font-bold text-blue-400">{r.partNumber}</div>
@@ -171,7 +209,7 @@ export default function History({ user, onBack }: Props) {
                       {r.approvedAt ? (
                         <>
                           <div className="font-bold text-green-500">{r.processedBy}</div>
-                          <div className="text-slate-500">{new Date(r.approvedAt).toLocaleString()}</div>
+                          <div className="text-slate-500">{formatDateTime(r.approvedAt)}</div>
                         </>
                       ) : '-'}
                    </td>
@@ -184,7 +222,7 @@ export default function History({ user, onBack }: Props) {
                       {r.receivedAt ? (
                         <>
                           <div className="font-bold text-blue-500">{r.receiverName}</div>
-                          <div className="text-slate-500">{new Date(r.receivedAt).toLocaleString()}</div>
+                          <div className="text-slate-500">{formatDateTime(r.receivedAt)}</div>
                         </>
                       ) : '-'}
                    </td>
@@ -209,7 +247,7 @@ export default function History({ user, onBack }: Props) {
         <tbody className="divide-y divide-slate-800 text-sm">
             {history.filter(h => activeTab === 'ALL' || h.category === activeTab).map(log => (
             <tr key={log.id} className="hover:bg-slate-800/50 transition-colors">
-                <td className="p-4 text-slate-500 text-xs">{new Date(log.date).toLocaleString()}</td>
+                <td className="p-4 text-slate-500 text-xs">{formatDateTime(log.date)}</td>
                 <td className="p-4 font-bold">{log.user}</td>
                 <td className="p-4 uppercase font-black text-xs tracking-tighter">{log.action}</td>
                 <td className="p-4 text-[10px] font-black uppercase text-slate-500">{log.category}</td>
