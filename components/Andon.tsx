@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useMemo } from 'react';
 import { ProductionBatch, LineMessage, User } from '../types';
 import { db } from '../services/supabaseService';
@@ -38,44 +37,45 @@ export default function Andon({ user, onBack }: Props) {
         .filter(b => b.line === line && b.status === 'UPCOMING')
         .sort((a,b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime())[0];
 
-      const textClass = colorTheme === 'green' ? 'text-green-500' : 'text-blue-500';
-      const themeClass = colorTheme === 'green' ? 'border-green-500 shadow-green-900/30' : 'border-blue-500 shadow-blue-900/30';
+      const textClass = colorTheme === 'green' ? 'neon-green-text' : 'neon-blue-text';
+      const borderClass = colorTheme === 'green' ? 'border-green-500 shadow-green-900/30' : 'border-blue-500 shadow-blue-900/30';
 
       return (
-        <div className={`rounded-[1.5rem] border-2 shadow-2xl bg-slate-900 p-3 flex flex-col h-full ${themeClass} overflow-hidden`}>
+        <div className={`rounded-[1.5rem] border-2 shadow-2xl bg-slate-900 p-3 flex flex-col h-full ${borderClass} overflow-hidden`}>
             <h3 className={`text-5xl font-black mb-1 ${textClass} tracking-tighter uppercase leading-tight`}>{line}</h3>
             <div className="flex-1 flex flex-col gap-2 min-h-0">
-                <div className="bg-slate-950/50 p-3 rounded-[1.2rem] border border-slate-800 shadow-inner flex flex-col flex-1 min-h-0">
-                    <div className="text-slate-500 text-[10px] font-black mb-1 uppercase tracking-widest">Current Batch</div>
+                <div className="bg-slate-950/50 p-2 rounded-[1.2rem] border border-slate-800 shadow-inner flex flex-col flex-1 min-h-0">
+                    <div className={`text-[10px] font-black mb-1 uppercase tracking-widest ${textClass} opacity-70`}>Current Batch</div>
                     {active ? (
                         <div className="flex flex-col flex-1 min-h-0">
                             <div className="flex justify-between items-end border-b border-slate-800 pb-1 mb-2">
-                                <div className="text-white text-3xl font-black truncate max-w-[55%] leading-tight">{active.name}</div>
-                                <div className={`text-7xl font-mono font-black ${textClass} leading-none drop-shadow-md`}>{active.totalQty}</div>
+                                <div className={`text-5xl font-black truncate max-w-[55%] leading-tight ${textClass}`}>{active.name}</div>
+                                <div className={`text-7xl font-mono font-black ${textClass} leading-none`}>{active.totalQty}</div>
                             </div>
-                            <div className="grid grid-cols-2 gap-2 overflow-y-auto flex-1 pr-1 custom-scrollbar">
+                            {/* Alterado para 3 colunas para garantir que as cores caibam verticalmente sem rolagem */}
+                            <div className="grid grid-cols-3 gap-2 overflow-y-auto flex-1 pr-1 custom-scrollbar">
                                 {Object.entries(active.colors).filter(([_,v]) => (v as number) > 0).map(([k,v]) => (
-                                    <div key={k} className="bg-slate-900 p-2 rounded-xl border border-slate-800 flex justify-between items-center shadow-lg hover:border-slate-700 transition-colors">
-                                        <span className="text-[10px] font-black text-slate-300 uppercase truncate mr-2 tracking-tight">{k}</span>
-                                        <span className="text-4xl font-mono font-black text-white">{v as number}</span>
+                                    <div key={k} className="bg-slate-900 p-2 rounded-xl border border-slate-800 flex flex-col items-center justify-center shadow-lg hover:border-slate-700 transition-colors">
+                                        <span className={`text-2xl font-black uppercase truncate tracking-tight mb-1 ${textClass}`}>{k}</span>
+                                        <span className={`text-8xl font-mono font-black ${textClass} leading-none`}>{v as number}</span>
                                     </div>
                                 ))}
                             </div>
                         </div>
-                    ) : <div className="flex-1 flex items-center justify-center text-slate-800 text-4xl font-black italic opacity-20 uppercase tracking-widest">Standby</div>}
+                    ) : <div className={`flex-1 flex items-center justify-center ${textClass} text-4xl font-black italic opacity-20 uppercase tracking-widest`}>Standby</div>}
                 </div>
                 {upcoming && (
-                    <div className="bg-slate-800/20 p-3 rounded-[1.2rem] border border-slate-700/50 border-dashed h-[25%] shrink-0 flex flex-col justify-center">
-                        <div className="text-slate-500 text-[9px] font-black mb-1 uppercase flex items-center gap-2 tracking-widest">
+                    <div className="bg-slate-800/20 p-2 rounded-[1.2rem] border border-slate-700/50 border-dashed h-[18%] shrink-0 flex flex-col justify-center">
+                        <div className={`text-[9px] font-black mb-0.5 uppercase flex items-center gap-2 tracking-widest ${textClass} opacity-60`}>
                            <ChevronRight size={12} /> Next
                         </div>
-                        <div className="flex justify-between items-center px-2 border-b border-slate-700/30 pb-1">
-                           <div className="text-white text-xl font-black truncate">{upcoming.name}</div>
-                           <div className="text-3xl font-mono text-slate-500 font-black">{upcoming.totalQty}</div>
+                        <div className="flex justify-between items-center px-2 border-b border-slate-700/30 pb-0.5">
+                           <div className={`text-xl font-black truncate ${textClass}`}>{upcoming.name}</div>
+                           <div className={`text-2xl font-mono font-black ${textClass} opacity-70`}>{upcoming.totalQty}</div>
                         </div>
-                        <div className="flex gap-2 mt-2 px-2 overflow-x-auto no-scrollbar">
+                        <div className="flex gap-2 mt-1 px-2 overflow-x-auto no-scrollbar">
                           {Object.entries(upcoming.colors).filter(([_,v]) => (v as number) > 0).map(([k,v]) => (
-                             <span key={k} className="bg-slate-900/80 px-2.5 py-1 rounded text-[9px] font-black border border-slate-700 whitespace-nowrap text-slate-400">
+                             <span key={k} className={`bg-slate-900/80 px-2 py-0.5 rounded text-[9px] font-black border border-slate-700 whitespace-nowrap ${textClass} opacity-60`}>
                                {k}: {v as number}
                              </span>
                           ))}
