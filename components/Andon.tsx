@@ -49,8 +49,12 @@ export default function Andon({ user, onBack }: Props) {
                     {active ? (
                         <div className="flex flex-col flex-1 min-h-0">
                             <div className="flex justify-between items-end border-b border-slate-800 pb-1 mb-2">
-                                <div className={`text-5xl font-black truncate max-w-[55%] leading-tight ${textClass}`}>{active.name}</div>
-                                <div className={`text-7xl font-mono font-black ${textClass} leading-none`}>{active.totalQty}</div>
+                                <div className={`text-5xl font-black truncate max-w-[40%] leading-tight ${textClass}`}>{active.name}</div>
+                                <div className={`text-7xl font-mono font-black ${textClass} leading-none whitespace-nowrap flex items-baseline gap-2`}>
+                                  <span>{active.totalQty}</span>
+                                  <span className="text-4xl opacity-40">/</span>
+                                  <span className="text-5xl opacity-40">30</span>
+                                </div>
                             </div>
                             {/* Alterado para 3 colunas para garantir que as cores caibam verticalmente sem rolagem */}
                             <div className="grid grid-cols-3 gap-2 overflow-y-auto flex-1 pr-1 custom-scrollbar">
