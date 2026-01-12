@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useMemo } from 'react';
 import { ProductionBatch, LineMessage, User } from '../types';
 import { db } from '../services/supabaseService';
@@ -33,56 +34,61 @@ export default function Andon({ user, onBack }: Props) {
 
   const renderBatchCard = (line: 'B-Line' | 'P-Line', colorTheme: 'green' | 'blue') => {
       const active = batches.find(b => b.line === line && b.status === 'ACTIVE');
-      const upcoming = batches
+      const upcomingBatches = batches
         .filter(b => b.line === line && b.status === 'UPCOMING')
-        .sort((a,b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime())[0];
+        .sort((a,b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime())
+        .slice(0, 2);
 
       const textClass = colorTheme === 'green' ? 'neon-green-text' : 'neon-blue-text';
       const borderClass = colorTheme === 'green' ? 'border-green-500 shadow-green-900/30' : 'border-blue-500 shadow-blue-900/30';
 
       return (
         <div className={`rounded-[1.5rem] border-2 shadow-2xl bg-slate-900 p-3 flex flex-col h-full ${borderClass} overflow-hidden`}>
-            <h3 className={`text-5xl font-black mb-1 ${textClass} tracking-tighter uppercase leading-tight`}>{line}</h3>
+            {/* Reduzido o título da linha de 5xl para 4xl */}
+            <h3 className={`text-4xl font-black mb-1 ${textClass} tracking-tighter uppercase leading-tight`}>{line}</h3>
+            
             <div className="flex-1 flex flex-col gap-2 min-h-0">
                 <div className="bg-slate-950/50 p-2 rounded-[1.2rem] border border-slate-800 shadow-inner flex flex-col flex-1 min-h-0">
                     <div className={`text-[10px] font-black mb-1 uppercase tracking-widest ${textClass} opacity-70`}>Current Batch</div>
                     {active ? (
                         <div className="flex flex-col flex-1 min-h-0">
-                            <div className="flex justify-between items-end border-b border-slate-800 pb-1 mb-2">
-                                <div className={`text-5xl font-black truncate max-w-[40%] leading-tight ${textClass}`}>{active.name}</div>
+                            <div className="flex justify-between items-end border-b border-slate-800 pb-2 mb-3 flex-wrap gap-2">
+                                {/* Aumentado o nome do lote para 8xl e adicionado espaçamento widest, removido o truncate e o max-w */}
+                                <div className={`text-8xl font-black leading-tight tracking-widest ${textClass} flex-1 min-w-[300px]`}>{active.name}</div>
                                 <div className={`text-7xl font-mono font-black ${textClass} leading-none whitespace-nowrap flex items-baseline gap-2`}>
                                   <span>{active.totalQty}</span>
                                   <span className="text-4xl opacity-40">/</span>
                                   <span className="text-5xl opacity-40">30</span>
                                 </div>
                             </div>
-                            {/* Alterado para 3 colunas para garantir que as cores caibam verticalmente sem rolagem */}
+                            
                             <div className="grid grid-cols-3 gap-2 overflow-y-auto flex-1 pr-1 custom-scrollbar">
                                 {Object.entries(active.colors).filter(([_,v]) => (v as number) > 0).map(([k,v]) => (
                                     <div key={k} className="bg-slate-900 p-2 rounded-xl border border-slate-800 flex flex-col items-center justify-center shadow-lg hover:border-slate-700 transition-colors">
-                                        <span className={`text-2xl font-black uppercase truncate tracking-tight mb-1 ${textClass}`}>{k}</span>
-                                        <span className={`text-8xl font-mono font-black ${textClass} leading-none`}>{v as number}</span>
+                                        {/* Reduzido o nome da cor para base */}
+                                        <span className={`text-base font-black uppercase truncate tracking-tight mb-1 ${textClass}`}>{k}</span>
+                                        {/* Reduzido o valor da cor para 6xl */}
+                                        <span className={`text-6xl font-mono font-black ${textClass} leading-none`}>{v as number}</span>
                                     </div>
                                 ))}
                             </div>
                         </div>
                     ) : <div className={`flex-1 flex items-center justify-center ${textClass} text-4xl font-black italic opacity-20 uppercase tracking-widest`}>Standby</div>}
                 </div>
-                {upcoming && (
-                    <div className="bg-slate-800/20 p-2 rounded-[1.2rem] border border-slate-700/50 border-dashed h-[18%] shrink-0 flex flex-col justify-center">
-                        <div className={`text-[9px] font-black mb-0.5 uppercase flex items-center gap-2 tracking-widest ${textClass} opacity-60`}>
-                           <ChevronRight size={12} /> Next
+
+                {upcomingBatches.length > 0 && (
+                    <div className="bg-slate-800/20 p-2 rounded-[1.2rem] border border-slate-700/50 border-dashed min-h-[30%] shrink-0 flex flex-col justify-start gap-2">
+                        <div className={`text-[9px] font-black uppercase flex items-center gap-2 tracking-widest ${textClass} opacity-60`}>
+                           <ChevronRight size={12} /> Next Batches
                         </div>
-                        <div className="flex justify-between items-center px-2 border-b border-slate-700/30 pb-0.5">
-                           <div className={`text-xl font-black truncate ${textClass}`}>{upcoming.name}</div>
-                           <div className={`text-2xl font-mono font-black ${textClass} opacity-70`}>{upcoming.totalQty}</div>
-                        </div>
-                        <div className="flex gap-2 mt-1 px-2 overflow-x-auto no-scrollbar">
-                          {Object.entries(upcoming.colors).filter(([_,v]) => (v as number) > 0).map(([k,v]) => (
-                             <span key={k} className={`bg-slate-900/80 px-2 py-0.5 rounded text-[9px] font-black border border-slate-700 whitespace-nowrap ${textClass} opacity-60`}>
-                               {k}: {v as number}
-                             </span>
-                          ))}
+                        <div className="flex flex-col gap-3">
+                            {upcomingBatches.map((batch, index) => (
+                                <div key={batch.id} className={`flex justify-between items-center px-3 ${index === 0 ? 'border-b border-slate-700/30 pb-2' : ''}`}>
+                                    {/* Nome do próximo lote aumentado para 7xl */}
+                                    <div className={`text-7xl font-black truncate max-w-[60%] tracking-widest ${textClass}`}>{batch.name}</div>
+                                    <div className={`text-4xl font-mono font-black ${textClass} opacity-70`}>{batch.totalQty} / 30</div>
+                                </div>
+                            ))}
                         </div>
                     </div>
                 )}
