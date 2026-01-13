@@ -258,7 +258,8 @@ class SupabaseService {
       observations: v.observations, 
       responsible: v.responsible || [],
       createdAt: v.created_at, 
-      createdBy: v.created_by, 
+      createdBy: v.created_by,
+      finishedAt: v.finished_at, // FIXED: Added finished_at mapping
       history: [] 
     }));
   }
