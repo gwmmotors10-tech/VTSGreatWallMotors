@@ -33,7 +33,11 @@ export default function FastRepair({ user, onBack }: FastRepairProps) {
   const [otherOrigin, setOtherOrigin] = useState('');
   const [newMissingPart, setNewMissingPart] = useState('');
 
-  useEffect(() => { refresh(); }, []);
+  useEffect(() => { 
+    refresh();
+    const interval = setInterval(refresh, 30000); // Auto refresh every 30s
+    return () => clearInterval(interval);
+  }, []);
 
   const refresh = async () => {
     setLoading(true);
@@ -73,7 +77,8 @@ export default function FastRepair({ user, onBack }: FastRepairProps) {
   const moveToAOFF = async (vin: string) => {
     if (!confirm('Mark vehicle as finished (AOFF)?')) return;
     try {
-      await db.updateVehicle(vin, { status: 'AOFF', destination: 'AOFF', finishedAt: new Date().toISOString() });
+      const now = new Date().toISOString();
+      await db.updateVehicle(vin, { status: 'AOFF', destination: 'AOFF', finishedAt: now });
       await db.logHistory(vin, 'MOVE_AOFF', user.fullName, 'Moved to AOFF status', 'FAST_REPAIR');
       refresh();
     } catch (error) {
@@ -100,6 +105,11 @@ export default function FastRepair({ user, onBack }: FastRepairProps) {
           vin: carForm.vin.trim().toUpperCase(),
           status: carForm.destination === 'AOFF' ? 'AOFF' : (carForm.destination === 'OFFLINE' ? 'OFFLINE' : 'FAST REPAIR')
         } as Vehicle;
+
+        // Ensure finishedAt is set for AOFF status
+        if (payload.status === 'AOFF' && !payload.finishedAt) {
+          payload.finishedAt = new Date().toISOString();
+        }
 
         if (editMode) {
           await db.updateVehicle(payload.vin, payload);
@@ -152,8 +162,8 @@ export default function FastRepair({ user, onBack }: FastRepairProps) {
   };
 
   const handleExport = () => {
-    const activeUnits = vehicles.filter(v => v.status !== 'AOFF');
-    if (activeUnits.length === 0) return alert("No active units found to export.");
+    const activeUnits = filteredVehicles.filter(v => v.status !== 'AOFF');
+    if (activeUnits.length === 0) return alert("No active units found in current filters to export.");
 
     const exportData = activeUnits.map(v => ({
       "VIN NUMBER": v.vin,
@@ -167,17 +177,21 @@ export default function FastRepair({ user, onBack }: FastRepairProps) {
       "OBSERVATIONS": v.observations || ''
     }));
 
-    db.exportData(exportData, 'Active_FastRepair_Offline_Units');
+    db.exportData(exportData, 'Active_Workshop_Inventory_Report');
   };
 
   const dailyCounts = useMemo(() => {
-    const today = new Date().toISOString().split('T')[0];
-    const todayVehicles = vehicles.filter(v => v.createdAt?.startsWith(today));
+    const todayStr = new Date().toDateString();
     
     return {
-      fastRepair: todayVehicles.filter(v => v.status === 'FAST REPAIR').length,
-      offline: todayVehicles.filter(v => v.status === 'OFFLINE').length,
-      aoff: todayVehicles.filter(v => v.status === 'AOFF').length
+      fastRepair: vehicles.filter(v => v.status === 'FAST REPAIR').length,
+      // Sums vehicles where destination is OFFLINE, PARKING or BOX_REPAIR
+      offline: vehicles.filter(v => 
+        v.destination === 'OFFLINE' || 
+        v.destination === 'PARKING' || 
+        v.destination === 'BOX_REPAIR'
+      ).length,
+      aoff: vehicles.filter(v => v.status === 'AOFF' && v.finishedAt && new Date(v.finishedAt).toDateString() === todayStr).length
     };
   }, [vehicles]);
 
@@ -194,10 +208,24 @@ export default function FastRepair({ user, onBack }: FastRepairProps) {
   }, [vehicles]);
 
   const filteredVehicles = useMemo(() => {
+    const todayStr = new Date().toDateString();
+    
     return vehicles.filter(v => {
       const matchVin = v.vin.includes(search.toUpperCase());
       const matchOrigin = filterOrigin === 'ALL' || v.origin === filterOrigin;
       const matchDest = filterDestination === 'ALL' || v.destination === filterDestination;
+      
+      // Midnight Cleanup Logic:
+      // If status is AOFF (Finished), only show if it was finished TODAY.
+      // At 23:59:59 (transition to next day), these will effectively disappear.
+      if (v.status === 'AOFF') {
+        if (!v.finishedAt) return false; // Safety: hide if no timestamp
+        const finishDate = new Date(v.finishedAt).toDateString();
+        if (finishDate !== todayStr) return false;
+      }
+      
+      // Other targets (Fast Repair, Offline, Parking, Box Repair) remain visible until manually moved or finished.
+
       return matchVin && matchOrigin && matchDest;
     });
   }, [vehicles, search, filterOrigin, filterDestination]);
@@ -211,7 +239,7 @@ export default function FastRepair({ user, onBack }: FastRepairProps) {
         </div>
         <div className="flex gap-3">
           <button onClick={handleExport} className="bg-green-600/10 text-green-500 border border-green-500/50 px-4 py-2 rounded-xl text-xs font-black uppercase tracking-widest hover:bg-green-600 hover:text-white transition flex items-center gap-2 shadow-lg">
-            <Download size={18} /> Export XLSX
+            <Download size={18} /> Export Active XLSX
           </button>
           <button onClick={openAdd} className="bg-blue-600 px-6 py-2 rounded-xl flex items-center gap-2 hover:bg-blue-700 shadow-lg transition font-black uppercase text-xs tracking-widest">
             <Plus size={18} /> Add Car
@@ -222,14 +250,14 @@ export default function FastRepair({ user, onBack }: FastRepairProps) {
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
         <div className="bg-slate-900 border border-slate-800 p-6 rounded-[2rem] shadow-xl flex items-center justify-between hover:border-yellow-500/30 transition-all group">
            <div>
-             <p className="text-[10px] text-slate-500 font-black uppercase tracking-widest mb-1">Today's Fast Repair</p>
+             <p className="text-[10px] text-slate-500 font-black uppercase tracking-widest mb-1">Total Fast Repair</p>
              <h4 className="text-4xl font-black text-yellow-500">{dailyCounts.fastRepair}</h4>
            </div>
            <Zap className="text-yellow-500/10 group-hover:text-yellow-500/20 transition-all" size={56} />
         </div>
         <div className="bg-slate-900 border border-slate-800 p-6 rounded-[2rem] shadow-xl flex items-center justify-between hover:border-red-500/30 transition-all group">
            <div>
-             <p className="text-[10px] text-slate-500 font-black uppercase tracking-widest mb-1">Today's Offline</p>
+             <p className="text-[10px] text-slate-500 font-black uppercase tracking-widest mb-1">Total Offline</p>
              <h4 className="text-4xl font-black text-red-500">{dailyCounts.offline}</h4>
            </div>
            <AlertCircle className="text-red-500/10 group-hover:text-red-500/20 transition-all" size={56} />
@@ -238,6 +266,7 @@ export default function FastRepair({ user, onBack }: FastRepairProps) {
            <div>
              <p className="text-[10px] text-slate-500 font-black uppercase tracking-widest mb-1">Today's AOFF (Finished)</p>
              <h4 className="text-4xl font-black text-green-500">{dailyCounts.aoff}</h4>
+             <p className="text-[8px] text-slate-600 font-bold uppercase mt-1">Resets at midnight</p>
            </div>
            <CheckSquare className="text-green-500/10 group-hover:text-green-500/20 transition-all" size={56} />
         </div>
@@ -316,7 +345,7 @@ export default function FastRepair({ user, onBack }: FastRepairProps) {
                 </div>
               ))}
               {filteredVehicles.length === 0 && (
-                <div className="text-center py-20 text-slate-600 font-black uppercase tracking-widest italic opacity-20">No vehicles matching filters</div>
+                <div className="text-center py-20 text-slate-600 font-black uppercase tracking-widest italic opacity-20">No active vehicles matching filters</div>
               )}
             </div>
         )}
