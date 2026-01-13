@@ -259,7 +259,7 @@ class SupabaseService {
       responsible: v.responsible || [],
       createdAt: v.created_at, 
       createdBy: v.created_by,
-      finishedAt: v.finished_at, // FIXED: Added finished_at mapping
+      finishedAt: v.finished_at, 
       history: [] 
     }));
   }
@@ -282,6 +282,7 @@ class SupabaseService {
 
   async updateVehicle(vin: string, updates: Partial<Vehicle>): Promise<void> {
     const dbUpdates: any = {};
+    if (updates.vin !== undefined) dbUpdates.vin = updates.vin.trim().toUpperCase(); // Allow VIN update
     if (updates.model !== undefined) dbUpdates.model = updates.model;
     if (updates.color !== undefined) dbUpdates.color = updates.color;
     if (updates.origin !== undefined) dbUpdates.origin = updates.origin;
