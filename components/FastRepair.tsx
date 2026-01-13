@@ -18,6 +18,7 @@ export default function FastRepair({ user, onBack }: FastRepairProps) {
   const [filterDestination, setFilterDestination] = useState('ALL');
   const [isSaving, setIsSaving] = useState(false);
   const [editMode, setEditMode] = useState(false);
+  const [originalVin, setOriginalVin] = useState('');
   
   const [carForm, setCarForm] = useState<Partial<Vehicle> & { targetLane?: string; targetSpot?: string }>({
     vin: '', 
@@ -34,9 +35,11 @@ export default function FastRepair({ user, onBack }: FastRepairProps) {
   const [otherOrigin, setOtherOrigin] = useState('');
   const [newMissingPart, setNewMissingPart] = useState('');
 
+  const canEditVin = user.role === 'Admin' || user.permissions.includes('editvinFR');
+
   useEffect(() => { 
     refresh();
-    const interval = setInterval(refresh, 10000); // Increased frequency for real-time updates
+    const interval = setInterval(refresh, 10000); 
     return () => clearInterval(interval);
   }, []);
 
@@ -51,6 +54,7 @@ export default function FastRepair({ user, onBack }: FastRepairProps) {
 
   const openAdd = () => {
     setEditMode(false);
+    setOriginalVin('');
     setCarForm({ 
       vin: '', 
       model: INITIAL_CAR_MODELS[0], 
@@ -67,6 +71,7 @@ export default function FastRepair({ user, onBack }: FastRepairProps) {
 
   const openEdit = (v: Vehicle) => {
     setEditMode(true);
+    setOriginalVin(v.vin);
     setCarForm({ ...v, targetLane: '', targetSpot: '' });
     if (!['FINAL LINE', 'PARKING', 'OFFLINE'].includes(v.origin)) {
       setOtherOrigin(v.origin);
@@ -111,8 +116,13 @@ export default function FastRepair({ user, onBack }: FastRepairProps) {
         }
 
         if (editMode) {
-          await db.updateVehicle(payload.vin, payload);
-          await db.logHistory(payload.vin, 'UPDATE_VEHICLE', user.fullName, `Updated info in Fast Repair (Target: ${payload.destination})`, 'FAST_REPAIR');
+          // Pass the original identifier (originalVin) to find the record, 
+          // while payload contains the potentially new VIN
+          await db.updateVehicle(originalVin, payload);
+          const details = originalVin !== payload.vin 
+            ? `Updated info in Fast Repair (VIN changed from ${originalVin} to ${payload.vin}, Target: ${payload.destination})`
+            : `Updated info in Fast Repair (Target: ${payload.destination})`;
+          await db.logHistory(payload.vin, 'UPDATE_VEHICLE', user.fullName, details, 'FAST_REPAIR');
         } else {
           payload.createdAt = new Date().toISOString();
           payload.createdBy = user.fullName;
@@ -191,7 +201,6 @@ export default function FastRepair({ user, onBack }: FastRepairProps) {
         v.destination === 'PARKING' || 
         v.destination === 'BOX_REPAIR'
       ).length,
-      // Production count: all vehicles finished on the current calendar day
       aoff: vehicles.filter(v => {
         if (v.status !== 'AOFF' || !v.finishedAt) return false;
         const finishDate = new Date(v.finishedAt);
@@ -222,15 +231,12 @@ export default function FastRepair({ user, onBack }: FastRepairProps) {
       const matchOrigin = filterOrigin === 'ALL' || v.origin === filterOrigin;
       const matchDest = filterDestination === 'ALL' || v.destination === filterDestination;
       
-      // Visibility Window:
-      // If status is AOFF (Finished), keep it on screen for exactly 24 hours from finish time.
       if (v.status === 'AOFF') {
         if (!v.finishedAt) return false;
         const finishTimestamp = new Date(v.finishedAt).getTime();
         if (now - finishTimestamp > twentyFourHoursMs) return false;
       }
       
-      // Active targets (not AOFF) always remain visible.
       return matchVin && matchOrigin && matchDest;
     });
   }, [vehicles, search, filterOrigin, filterDestination]);
@@ -369,7 +375,8 @@ export default function FastRepair({ user, onBack }: FastRepairProps) {
               <div className="space-y-6">
                  <div>
                     <label className="text-[10px] text-slate-500 font-black uppercase tracking-[0.2em] mb-2 block">VIN (17 characters)</label>
-                    <input disabled={editMode} className="w-full bg-slate-900 border border-slate-700 p-4 rounded-2xl text-white uppercase font-mono tracking-widest outline-none focus:border-blue-500 transition-all shadow-inner" placeholder="ENTER VIN..." maxLength={17} value={carForm.vin} onChange={e => setCarForm({...carForm, vin: e.target.value.toUpperCase()})} />
+                    <input disabled={editMode && !canEditVin} className="w-full bg-slate-900 border border-slate-700 p-4 rounded-2xl text-white uppercase font-mono tracking-widest outline-none focus:border-blue-500 transition-all shadow-inner disabled:opacity-50 disabled:cursor-not-allowed" placeholder="ENTER VIN..." maxLength={17} value={carForm.vin} onChange={e => setCarForm({...carForm, vin: e.target.value.toUpperCase()})} />
+                    {editMode && !canEditVin && <p className="text-[9px] text-red-400 mt-1 uppercase font-bold italic">Permission 'editvinFR' required to change VIN</p>}
                  </div>
                  <div className="grid grid-cols-2 gap-4">
                     <div>
