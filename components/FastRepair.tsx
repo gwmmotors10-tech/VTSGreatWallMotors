@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useMemo } from 'react';
 import { User, Vehicle, INITIAL_CAR_MODELS, INITIAL_COLORS, RESPONSIBLE_SHOPS } from '../types';
 import { db } from '../services/supabaseService';
@@ -35,12 +36,11 @@ export default function FastRepair({ user, onBack }: FastRepairProps) {
 
   useEffect(() => { 
     refresh();
-    const interval = setInterval(refresh, 30000); // Auto refresh every 30s
+    const interval = setInterval(refresh, 10000); // Increased frequency for real-time updates
     return () => clearInterval(interval);
   }, []);
 
   const refresh = async () => {
-    setLoading(true);
     try { 
       const data = await db.getVehicles(); 
       setVehicles(data); 
@@ -106,7 +106,6 @@ export default function FastRepair({ user, onBack }: FastRepairProps) {
           status: carForm.destination === 'AOFF' ? 'AOFF' : (carForm.destination === 'OFFLINE' ? 'OFFLINE' : 'FAST REPAIR')
         } as Vehicle;
 
-        // Ensure finishedAt is set for AOFF status
         if (payload.status === 'AOFF' && !payload.finishedAt) {
           payload.finishedAt = new Date().toISOString();
         }
@@ -181,17 +180,24 @@ export default function FastRepair({ user, onBack }: FastRepairProps) {
   };
 
   const dailyCounts = useMemo(() => {
-    const todayStr = new Date().toDateString();
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const todayTimestamp = today.getTime();
     
     return {
       fastRepair: vehicles.filter(v => v.status === 'FAST REPAIR').length,
-      // Sums vehicles where destination is OFFLINE, PARKING or BOX_REPAIR
       offline: vehicles.filter(v => 
         v.destination === 'OFFLINE' || 
         v.destination === 'PARKING' || 
         v.destination === 'BOX_REPAIR'
       ).length,
-      aoff: vehicles.filter(v => v.status === 'AOFF' && v.finishedAt && new Date(v.finishedAt).toDateString() === todayStr).length
+      // Production count: all vehicles finished on the current calendar day
+      aoff: vehicles.filter(v => {
+        if (v.status !== 'AOFF' || !v.finishedAt) return false;
+        const finishDate = new Date(v.finishedAt);
+        finishDate.setHours(0, 0, 0, 0);
+        return finishDate.getTime() === todayTimestamp;
+      }).length
     };
   }, [vehicles]);
 
@@ -208,24 +214,23 @@ export default function FastRepair({ user, onBack }: FastRepairProps) {
   }, [vehicles]);
 
   const filteredVehicles = useMemo(() => {
-    const todayStr = new Date().toDateString();
+    const now = Date.now();
+    const twentyFourHoursMs = 24 * 60 * 60 * 1000;
     
     return vehicles.filter(v => {
       const matchVin = v.vin.includes(search.toUpperCase());
       const matchOrigin = filterOrigin === 'ALL' || v.origin === filterOrigin;
       const matchDest = filterDestination === 'ALL' || v.destination === filterDestination;
       
-      // Midnight Cleanup Logic:
-      // If status is AOFF (Finished), only show if it was finished TODAY.
-      // At 23:59:59 (transition to next day), these will effectively disappear.
+      // Visibility Window:
+      // If status is AOFF (Finished), keep it on screen for exactly 24 hours from finish time.
       if (v.status === 'AOFF') {
-        if (!v.finishedAt) return false; // Safety: hide if no timestamp
-        const finishDate = new Date(v.finishedAt).toDateString();
-        if (finishDate !== todayStr) return false;
+        if (!v.finishedAt) return false;
+        const finishTimestamp = new Date(v.finishedAt).getTime();
+        if (now - finishTimestamp > twentyFourHoursMs) return false;
       }
       
-      // Other targets (Fast Repair, Offline, Parking, Box Repair) remain visible until manually moved or finished.
-
+      // Active targets (not AOFF) always remain visible.
       return matchVin && matchOrigin && matchDest;
     });
   }, [vehicles, search, filterOrigin, filterDestination]);
@@ -266,7 +271,7 @@ export default function FastRepair({ user, onBack }: FastRepairProps) {
            <div>
              <p className="text-[10px] text-slate-500 font-black uppercase tracking-widest mb-1">Today's AOFF (Finished)</p>
              <h4 className="text-4xl font-black text-green-500">{dailyCounts.aoff}</h4>
-             <p className="text-[8px] text-slate-600 font-bold uppercase mt-1">Resets at midnight</p>
+             <p className="text-[8px] text-slate-600 font-bold uppercase mt-1">Calendar Day Counter</p>
            </div>
            <CheckSquare className="text-green-500/10 group-hover:text-green-500/20 transition-all" size={56} />
         </div>
@@ -333,6 +338,9 @@ export default function FastRepair({ user, onBack }: FastRepairProps) {
                        <span><strong className="text-slate-500 font-black">FROM:</strong> {car.origin}</span>
                        <span><strong className="text-slate-500 font-black">TARGET:</strong> {car.destination}</span>
                        <span><strong className="text-slate-500">RESP:</strong> {car.responsible?.join(', ') || 'N/A'}</span>
+                       {car.finishedAt && car.status === 'AOFF' && (
+                         <span className="text-green-500/80 italic">Finished: {new Date(car.finishedAt).toLocaleString()}</span>
+                       )}
                     </div>
                   </div>
                   <div className="flex gap-3">
