@@ -310,15 +310,26 @@ class SupabaseService {
     return results;
   }
 
-  async addRework(session: ReworkSession): Promise<void> {
-    const { data } = await this.supabase.from('rework_sessions').insert({ 
+  async addRework(session: ReworkSession): Promise<ReworkSession | null> {
+    const { data, error } = await this.supabase.from('rework_sessions').insert({ 
       vin: session.vin, user_name: session.user, start_time: session.startTime, 
       end_time: session.endTime, status: session.status, defects_count: session.defectsCount, 
       shop: session.shop, observations: session.observations, not_finished_reason: session.notFinishedReason 
     }).select().single();
+    
+    if (error) {
+      console.error("Error adding rework:", error);
+      return null;
+    }
+
     if (data && session.materials.length > 0) {
       await this.supabase.from('rework_materials').insert(session.materials.map(m => ({ session_id: data.id, name: m.name, qty: m.qty })));
     }
+
+    return { 
+      ...session, 
+      id: data.id.toString() 
+    };
   }
 
   async updateRework(sessionId: string, updates: Partial<ReworkSession>): Promise<void> {
