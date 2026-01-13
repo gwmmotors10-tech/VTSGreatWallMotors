@@ -41,6 +41,13 @@ export default function History({ user, onBack }: Props) {
     return `${day}/${month}/${year} ${hours}:${minutes}`;
   };
 
+  const calculateLeadTime = (start: string, end?: string) => {
+    if (!start || !end) return '-';
+    const diffMs = new Date(end).getTime() - new Date(start).getTime();
+    const diffMins = Math.floor(diffMs / (1000 * 60));
+    return diffMins >= 0 ? `${diffMins} min` : '-';
+  };
+
   const handleExport = () => {
     let dataToExport = [];
     let fileName = "VTS_History";
@@ -62,6 +69,8 @@ export default function History({ user, onBack }: Props) {
       dataToExport = filterByDate(vehicles, 'createdAt').map(v => ({
         "VIN NUMBER": v.vin,
         "DATA DE INCLUSAO": formatDateTime(v.createdAt),
+        "CONCLUSAO (AOFF)": v.finishedAt ? formatDateTime(v.finishedAt) : 'Pending',
+        "LEAD TIME (MIN)": calculateLeadTime(v.createdAt, v.finishedAt).replace(' min', ''),
         "MODEL": v.model,
         "COLOR": v.color,
         "ORIGIN": v.origin,
@@ -152,7 +161,9 @@ export default function History({ user, onBack }: Props) {
            <thead className="bg-slate-800 sticky top-0 shadow-lg z-10">
               <tr className="text-[10px] uppercase text-slate-400 tracking-widest">
                  <th className="p-4">VIN Number</th>
-                 <th className="p-4">Incluído em</th>
+                 <th className="p-4">Inclusão</th>
+                 <th className="p-4">Conclusão (AOFF)</th>
+                 <th className="p-4 text-center">Lead Time</th>
                  <th className="p-4">Model/Color</th>
                  <th className="p-4">Route (Origin/Dest)</th>
                  <th className="p-4">Responsible</th>
@@ -164,6 +175,12 @@ export default function History({ user, onBack }: Props) {
                 <tr key={v.vin} className="hover:bg-slate-800/50 transition-colors">
                    <td className="p-4 font-mono font-black text-white tracking-widest">{v.vin}</td>
                    <td className="p-4 text-slate-500 font-medium">{formatDateTime(v.createdAt)}</td>
+                   <td className="p-4 text-green-500 font-medium">{v.finishedAt ? formatDateTime(v.finishedAt) : '-'}</td>
+                   <td className="p-4 text-center">
+                     <span className="bg-blue-600/20 text-blue-400 px-2 py-1 rounded font-bold">
+                       {calculateLeadTime(v.createdAt, v.finishedAt)}
+                     </span>
+                   </td>
                    <td className="p-4 font-bold">
                       <div className="text-white">{v.model}</div>
                       <div className="text-slate-500 font-black">{v.color}</div>
