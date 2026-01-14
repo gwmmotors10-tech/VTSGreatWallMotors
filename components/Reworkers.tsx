@@ -18,25 +18,29 @@ export default function Reworkers({ user, onBack }: Props) {
   const [activeSessionsList, setActiveSessionsList] = useState<ReworkSession[]>([]);
   const [isSubmitting, setIsSubmitting] = useState(false);
   
-  // Ref para rastrear se estamos no meio de uma finalização para evitar que o poller sobrescreva o estado
+  // Ref para rastrear se estamos no meio de uma finalização ou se acabamos de finalizar
   const isFinalizingRef = useRef(false);
-  // Ref para guardar o ID da última sessão finalizada e ignorá-la se o banco demorar a atualizar
   const lastFinishedIdRef = useRef<string | null>(null);
 
   useEffect(() => {
     const fetch = async () => {
-      // Se estiver finalizando ou o componente desmontou, não busca
+      // Se estiver salvando agora, ignora o poller para não sobrescrever o estado local "limpo"
       if (isFinalizingRef.current) return;
 
       const sess = await db.getReworks();
-      const myActive = sess.find(s => 
-        s.user === user.fullName && 
+      
+      // Filtra sessões ativas (não concluídas) e ignora a que acabamos de fechar
+      const allActive = sess.filter(s => 
         (s.status === 'IN_PROGRESS' || s.status === 'PAUSED') &&
-        s.id !== lastFinishedIdRef.current // Importante: Ignora a que acabamos de fechar
+        s.id !== lastFinishedIdRef.current
       );
+
+      // Busca a minha sessão ativa
+      const myActive = allActive.find(s => s.user === user.fullName);
       
       if (myActive) { 
         setActiveSession(myActive); 
+        // Apenas atualiza o formulário se não estivermos editando algo manualmente (evitar pulos de cursor)
         setSessionForm(prev => ({ 
           ...prev,
           vin: myActive.vin, 
@@ -46,29 +50,28 @@ export default function Reworkers({ user, onBack }: Props) {
         })); 
         setMaterials(myActive.materials); 
       } else {
-        // Se não encontrou nada ativo para mim, garante que o estado local está limpo
-        if (!isFinalizingRef.current) {
-          setActiveSession(null);
-        }
+        // Se o banco diz que não tenho nada ativo, e não estou finalizando, limpo o estado
+        setActiveSession(null);
       }
       
-      // Atualiza a lista geral de operadores ativos
-      setActiveSessionsList(sess.filter(s => (s.status === 'IN_PROGRESS' || s.status === 'PAUSED') && s.id !== lastFinishedIdRef.current));
+      setActiveSessionsList(allActive);
     };
 
     fetch();
-    const interval = setInterval(() => {
-      if (activeSession && activeSession.status === 'IN_PROGRESS') {
-        setCurrentTime(Date.now());
-      }
+    
+    // Poller de dados (5s)
+    const poller = setInterval(fetch, 5000);
+    
+    // Cronômetro de UI (1s) - Atualiza sempre para manter a lista da direita em tempo real
+    const timer = setInterval(() => {
+      setCurrentTime(Date.now());
     }, 1000);
 
-    const poller = setInterval(fetch, 5000);
     return () => { 
-      clearInterval(interval); 
       clearInterval(poller); 
+      clearInterval(timer);
     };
-  }, [user.fullName, activeSession?.status]);
+  }, [user.fullName]);
 
   const formatElapsed = (start: string) => {
     const diff = Math.max(0, currentTime - new Date(start).getTime());
@@ -101,8 +104,6 @@ export default function Reworkers({ user, onBack }: Props) {
         lastFinishedIdRef.current = null; // Reseta a trava ao iniciar nova
         await db.updateUserStatus(user.username, 'ONLINE');
         setActiveSession(createdSess);
-      } else {
-        alert("Failed to create session in database.");
       }
     } catch (e) {
       alert("Error starting repair.");
@@ -115,9 +116,9 @@ export default function Reworkers({ user, onBack }: Props) {
     if (!activeSession) return;
     if (!confirm('Finalize and save this rework session?')) return;
 
+    const sessionIdToClose = activeSession.id;
     isFinalizingRef.current = true;
     setIsSubmitting(true);
-    const sessionIdToClose = activeSession.id;
 
     try {
       // 1. Atualiza no Banco
@@ -132,9 +133,9 @@ export default function Reworkers({ user, onBack }: Props) {
       await db.updateUserStatus(user.username, 'OFFLINE');
       
       // 3. Log de Histórico
-      await db.logHistory(activeSession.vin, 'REWORK_FINISH', user.fullName, `Finished repair with ${materials.length} materials`, 'REWORKERS');
+      await db.logHistory(activeSession.vin, 'REWORK_FINISH', user.fullName, `Finished repair at ${sessionForm.shop}`, 'REWORKERS');
       
-      // 4. Marca como finalizada na nossa "lista negra" temporária
+      // 4. Marca como finalizada na nossa trava local para o poller ignorar
       lastFinishedIdRef.current = sessionIdToClose;
 
       // 5. Limpa os estados locais IMEDIATAMENTE
@@ -148,7 +149,8 @@ export default function Reworkers({ user, onBack }: Props) {
       alert('Failed to finish session. Check connection.');
     } finally {
       setIsSubmitting(false);
-      // Mantém a trava por 3 segundos para dar tempo do banco refletir a mudança
+      // Mantém isFinalizing como true por alguns segundos para garantir que o 
+      // próximo ciclo do poller pegue o banco já atualizado.
       setTimeout(() => {
         isFinalizingRef.current = false;
       }, 3000);
@@ -232,7 +234,7 @@ export default function Reworkers({ user, onBack }: Props) {
               <button 
                 onClick={finishRepair} 
                 disabled={isSubmitting} 
-                className="w-full bg-blue-600 hover:bg-blue-700 py-5 rounded-[1.5rem] font-black uppercase text-sm tracking-widest shadow-xl shadow-green-500/20 transition-all active:scale-95 flex items-center justify-center gap-3 disabled:opacity-50"
+                className="w-full bg-blue-600 hover:bg-blue-700 py-5 rounded-[1.5rem] font-black uppercase text-sm tracking-widest shadow-xl shadow-blue-500/20 transition-all active:scale-95 flex items-center justify-center gap-3 disabled:opacity-50"
               >
                 {isSubmitting ? <Loader2 className="animate-spin" size={24} /> : <CheckSquare size={24} />} 
                 Finalize & Save Session
