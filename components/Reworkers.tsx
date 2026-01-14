@@ -20,13 +20,20 @@ export default function Reworkers({ user, onBack }: Props) {
   
   // Ref para rastrear se estamos no meio de uma finalização para evitar que o poller sobrescreva o estado
   const isFinalizingRef = useRef(false);
+  // Ref para guardar o ID da última sessão finalizada e ignorá-la se o banco demorar a atualizar
+  const lastFinishedIdRef = useRef<string | null>(null);
 
   useEffect(() => {
     const fetch = async () => {
+      // Se estiver finalizando ou o componente desmontou, não busca
       if (isFinalizingRef.current) return;
 
       const sess = await db.getReworks();
-      const myActive = sess.find(s => s.user === user.fullName && (s.status === 'IN_PROGRESS' || s.status === 'PAUSED'));
+      const myActive = sess.find(s => 
+        s.user === user.fullName && 
+        (s.status === 'IN_PROGRESS' || s.status === 'PAUSED') &&
+        s.id !== lastFinishedIdRef.current // Importante: Ignora a que acabamos de fechar
+      );
       
       if (myActive) { 
         setActiveSession(myActive); 
@@ -39,22 +46,28 @@ export default function Reworkers({ user, onBack }: Props) {
         })); 
         setMaterials(myActive.materials); 
       } else {
-        setActiveSession(null);
+        // Se não encontrou nada ativo para mim, garante que o estado local está limpo
+        if (!isFinalizingRef.current) {
+          setActiveSession(null);
+        }
       }
       
-      setActiveSessionsList(sess.filter(s => s.status === 'IN_PROGRESS' || s.status === 'PAUSED'));
+      // Atualiza a lista geral de operadores ativos
+      setActiveSessionsList(sess.filter(s => (s.status === 'IN_PROGRESS' || s.status === 'PAUSED') && s.id !== lastFinishedIdRef.current));
     };
 
     fetch();
     const interval = setInterval(() => {
-      // Só atualiza o tempo se houver uma sessão realmente ativa (não pausada)
       if (activeSession && activeSession.status === 'IN_PROGRESS') {
         setCurrentTime(Date.now());
       }
     }, 1000);
 
     const poller = setInterval(fetch, 5000);
-    return () => { clearInterval(interval); clearInterval(poller); };
+    return () => { 
+      clearInterval(interval); 
+      clearInterval(poller); 
+    };
   }, [user.fullName, activeSession?.status]);
 
   const formatElapsed = (start: string) => {
@@ -72,7 +85,7 @@ export default function Reworkers({ user, onBack }: Props) {
     setIsSubmitting(true);
     try {
       const sess: ReworkSession = { 
-        id: '', // Será definido pelo DB
+        id: '', 
         vin: sessionForm.vin, 
         user: user.fullName, 
         startTime: new Date().toISOString(), 
@@ -85,6 +98,7 @@ export default function Reworkers({ user, onBack }: Props) {
       
       const createdSess = await db.addRework(sess);
       if (createdSess) {
+        lastFinishedIdRef.current = null; // Reseta a trava ao iniciar nova
         await db.updateUserStatus(user.username, 'ONLINE');
         setActiveSession(createdSess);
       } else {
@@ -103,31 +117,41 @@ export default function Reworkers({ user, onBack }: Props) {
 
     isFinalizingRef.current = true;
     setIsSubmitting(true);
+    const sessionIdToClose = activeSession.id;
+
     try {
-      await db.updateRework(activeSession.id, { 
+      // 1. Atualiza no Banco
+      await db.updateRework(sessionIdToClose, { 
         status: 'COMPLETED', 
         endTime: new Date().toISOString(),
         observations: sessionForm.obs,
         defectsCount: sessionForm.defectsCount
       });
       
+      // 2. Atualiza status do usuário
       await db.updateUserStatus(user.username, 'OFFLINE');
+      
+      // 3. Log de Histórico
       await db.logHistory(activeSession.vin, 'REWORK_FINISH', user.fullName, `Finished repair with ${materials.length} materials`, 'REWORKERS');
       
-      // Limpa os estados locais IMEDIATAMENTE
+      // 4. Marca como finalizada na nossa "lista negra" temporária
+      lastFinishedIdRef.current = sessionIdToClose;
+
+      // 5. Limpa os estados locais IMEDIATAMENTE
       setActiveSession(null);
       setMaterials([]);
       setSessionForm({ vin: '', shop: SHOPS[0], defectsCount: 0, obs: '' });
+      
       alert('Repair session finalized and saved.');
     } catch (e) {
       console.error(e);
       alert('Failed to finish session. Check connection.');
     } finally {
       setIsSubmitting(false);
-      // Aguarda um pouco antes de liberar o poller para o DB processar a mudança
+      // Mantém a trava por 3 segundos para dar tempo do banco refletir a mudança
       setTimeout(() => {
         isFinalizingRef.current = false;
-      }, 2000);
+      }, 3000);
     }
   };
 
