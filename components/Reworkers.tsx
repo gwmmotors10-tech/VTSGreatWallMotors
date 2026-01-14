@@ -2,7 +2,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { User, ReworkSession, SHOPS, ReworkMaterial } from '../types';
 import { db } from '../services/supabaseService';
-import { ArrowLeft, Play, Pause, CheckSquare, Clock, Plus, Trash, Loader2 } from 'lucide-react';
+import { ArrowLeft, Play, Pause, CheckSquare, Clock, Plus, Trash, Loader2, AlertCircle } from 'lucide-react';
 
 interface Props {
   user: User;
@@ -18,29 +18,29 @@ export default function Reworkers({ user, onBack }: Props) {
   const [activeSessionsList, setActiveSessionsList] = useState<ReworkSession[]>([]);
   const [isSubmitting, setIsSubmitting] = useState(false);
   
-  // Ref para rastrear se estamos no meio de uma finalização ou se acabamos de finalizar
+  // Ref to track if we are in the middle of finishing or have just finished
   const isFinalizingRef = useRef(false);
   const lastFinishedIdRef = useRef<string | null>(null);
 
   useEffect(() => {
     const fetch = async () => {
-      // Se estiver salvando agora, ignora o poller para não sobrescrever o estado local "limpo"
+      // If saving right now, ignore poller to avoid overwriting "clean" local state
       if (isFinalizingRef.current) return;
 
       const sess = await db.getReworks();
       
-      // Filtra sessões ativas (não concluídas) e ignora a que acabamos de fechar
+      // Filter active sessions (not completed) and ignore the one we just closed
       const allActive = sess.filter(s => 
         (s.status === 'IN_PROGRESS' || s.status === 'PAUSED') &&
         s.id !== lastFinishedIdRef.current
       );
 
-      // Busca a minha sessão ativa
+      // Look for my active session
       const myActive = allActive.find(s => s.user === user.fullName);
       
       if (myActive) { 
         setActiveSession(myActive); 
-        // Apenas atualiza o formulário se não estivermos editando algo manualmente (evitar pulos de cursor)
+        // Only update form if not manually editing (to avoid cursor jumps)
         setSessionForm(prev => ({ 
           ...prev,
           vin: myActive.vin, 
@@ -50,7 +50,7 @@ export default function Reworkers({ user, onBack }: Props) {
         })); 
         setMaterials(myActive.materials); 
       } else {
-        // Se o banco diz que não tenho nada ativo, e não estou finalizando, limpo o estado
+        // If DB says I have nothing active, and I'm not finalizing, clear state
         setActiveSession(null);
       }
       
@@ -59,10 +59,10 @@ export default function Reworkers({ user, onBack }: Props) {
 
     fetch();
     
-    // Poller de dados (5s)
+    // Data poller (5s)
     const poller = setInterval(fetch, 5000);
     
-    // Cronômetro de UI (1s) - Atualiza sempre para manter a lista da direita em tempo real
+    // UI Timer (1s) - Always update to keep the right-side list in real-time
     const timer = setInterval(() => {
       setCurrentTime(Date.now());
     }, 1000);
@@ -82,6 +82,12 @@ export default function Reworkers({ user, onBack }: Props) {
   };
 
   const startRepair = async () => {
+    // Check if the operator already has an active session in the global list
+    if (activeSessionsList.some(s => s.user === user.fullName)) {
+      alert('You already have an active rework session. Please finish it before starting a new one.');
+      return;
+    }
+
     const vinRegex = /^[A-Z0-9]{17}$/;
     if (!vinRegex.test(sessionForm.vin)) return alert('Enter valid 17-character alphanumeric VIN');
     
@@ -101,7 +107,7 @@ export default function Reworkers({ user, onBack }: Props) {
       
       const createdSess = await db.addRework(sess);
       if (createdSess) {
-        lastFinishedIdRef.current = null; // Reseta a trava ao iniciar nova
+        lastFinishedIdRef.current = null; // Reset lock when starting new
         await db.updateUserStatus(user.username, 'ONLINE');
         setActiveSession(createdSess);
       }
@@ -121,7 +127,7 @@ export default function Reworkers({ user, onBack }: Props) {
     setIsSubmitting(true);
 
     try {
-      // 1. Atualiza no Banco
+      // 1. Update in Database
       await db.updateRework(sessionIdToClose, { 
         status: 'COMPLETED', 
         endTime: new Date().toISOString(),
@@ -129,16 +135,16 @@ export default function Reworkers({ user, onBack }: Props) {
         defectsCount: sessionForm.defectsCount
       });
       
-      // 2. Atualiza status do usuário
+      // 2. Update User Status
       await db.updateUserStatus(user.username, 'OFFLINE');
       
-      // 3. Log de Histórico
+      // 3. History Log
       await db.logHistory(activeSession.vin, 'REWORK_FINISH', user.fullName, `Finished repair at ${sessionForm.shop}`, 'REWORKERS');
       
-      // 4. Marca como finalizada na nossa trava local para o poller ignorar
+      // 4. Mark as finished in local lock so poller ignores it
       lastFinishedIdRef.current = sessionIdToClose;
 
-      // 5. Limpa os estados locais IMEDIATAMENTE
+      // 5. Clear local state IMMEDIATELY
       setActiveSession(null);
       setMaterials([]);
       setSessionForm({ vin: '', shop: SHOPS[0], defectsCount: 0, obs: '' });
@@ -149,8 +155,8 @@ export default function Reworkers({ user, onBack }: Props) {
       alert('Failed to finish session. Check connection.');
     } finally {
       setIsSubmitting(false);
-      // Mantém isFinalizing como true por alguns segundos para garantir que o 
-      // próximo ciclo do poller pegue o banco já atualizado.
+      // Keep isFinalizing as true for a few seconds to ensure next poller cycle
+      // gets the updated database.
       setTimeout(() => {
         isFinalizingRef.current = false;
       }, 3000);
@@ -162,7 +168,7 @@ export default function Reworkers({ user, onBack }: Props) {
        <div className="flex items-center justify-between mb-6">
           <div className="flex items-center gap-4">
              <button onClick={onBack} className="p-2 bg-slate-800 rounded-full transition hover:bg-slate-700 shadow-lg"><ArrowLeft /></button>
-             <h2 className="text-2xl font-bold uppercase tracking-tight">Rework Station</h2>
+             <h2 className="text-2xl font-bold uppercase tracking-tight text-white">Rework Station</h2>
           </div>
           {activeSession && (
               <div className={`px-6 py-2 rounded-2xl border flex items-center gap-4 shadow-xl transition-all ${activeSession.status === 'IN_PROGRESS' ? 'bg-blue-600/20 border-blue-500/50 animate-pulse' : 'bg-yellow-600/10 border-yellow-500/30'}`}>
@@ -175,56 +181,64 @@ export default function Reworkers({ user, onBack }: Props) {
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
         <div className="bg-slate-900 p-8 rounded-[2.5rem] border border-slate-800 shadow-2xl space-y-6">
-          <div className="space-y-4">
-             <div>
-               <label className="text-[10px] text-slate-500 font-bold uppercase tracking-widest mb-1 block">Vehicle VIN (17 chars)</label>
-               <input disabled={!!activeSession || isSubmitting} className="w-full bg-slate-950 p-4 rounded-2xl border border-slate-800 text-xl font-mono outline-none uppercase focus:border-blue-500 transition-all shadow-inner" placeholder="ENTER VIN..." value={sessionForm.vin} onChange={e => setSessionForm({...sessionForm, vin: e.target.value.toUpperCase()})} maxLength={17} />
-             </div>
-             
-             <div>
-               <label className="text-[10px] text-slate-500 font-bold uppercase tracking-widest mb-1 block">Responsible Shop</label>
-               <select disabled={!!activeSession || isSubmitting} className="w-full bg-slate-950 p-4 rounded-2xl border border-slate-800 focus:border-blue-500 outline-none transition-all shadow-inner" value={sessionForm.shop} onChange={e => setSessionForm({...sessionForm, shop: e.target.value})}>
-                  {SHOPS.map(s => <option key={s}>{s}</option>)}
-               </select>
-             </div>
-
-             <div>
-               <label className="text-[10px] text-slate-500 font-bold uppercase tracking-widest mb-1 block">Materials Inventory Log</label>
-               <div className="bg-slate-800/50 p-6 rounded-3xl border border-slate-700/50 space-y-4 shadow-inner">
-                  <div className="flex gap-2">
-                      <input disabled={isSubmitting} className="flex-1 bg-slate-950 p-3 rounded-xl border border-slate-800 text-sm outline-none focus:border-blue-500" placeholder="Material Name..." value={newMaterial.name} onChange={e => setNewMaterial({...newMaterial, name: e.target.value})} />
-                      <input disabled={isSubmitting} type="number" className="w-20 bg-slate-950 p-3 rounded-xl border border-slate-800 text-center text-sm outline-none focus:border-blue-500" value={newMaterial.qty} onChange={e => setNewMaterial({...newMaterial, qty: parseInt(e.target.value) || 1})} min={1} />
-                      <button disabled={isSubmitting} onClick={() => { if(newMaterial.name) setMaterials([...materials, {...newMaterial}]); setNewMaterial({name:'', qty:1}); }} className="bg-blue-600 px-4 rounded-xl hover:bg-blue-700 transition shadow-lg active:scale-95"><Plus size={18}/></button>
-                  </div>
-                  <div className="space-y-2 max-h-40 overflow-y-auto custom-scrollbar pr-2">
-                    {materials.length === 0 ? (
-                      <p className="text-[10px] text-slate-600 uppercase font-black text-center py-4 italic">No materials logged</p>
-                    ) : materials.map((m, i) => (
-                        <div key={i} className="flex justify-between items-center bg-slate-950/80 p-3 rounded-xl border border-slate-800 group transition-all hover:border-slate-700">
-                            <span className="font-bold text-slate-200">{m.name} <span className="text-blue-500 ml-2 font-mono">x{m.qty}</span></span>
-                            {!activeSession && <button onClick={() => setMaterials(materials.filter((_,idx)=>idx!==i))} className="text-red-500 hover:bg-red-500/10 p-1 rounded-lg transition-colors"><Trash size={16}/></button>}
-                        </div>
-                    ))}
-                  </div>
+          {!activeSession && activeSessionsList.some(s => s.user === user.fullName) ? (
+            <div className="bg-red-600/10 border border-red-500/50 p-6 rounded-3xl flex flex-col items-center gap-4 text-center">
+              <AlertCircle size={48} className="text-red-500" />
+              <p className="font-black text-red-500 uppercase tracking-widest">Active session detected in background</p>
+              <p className="text-xs text-slate-400">Waiting for system to synchronize...</p>
+            </div>
+          ) : (
+            <div className="space-y-4">
+               <div>
+                 <label className="text-[10px] text-slate-500 font-bold uppercase tracking-widest mb-1 block">Vehicle VIN (17 chars)</label>
+                 <input disabled={!!activeSession || isSubmitting} className="w-full bg-slate-950 p-4 rounded-2xl border border-slate-800 text-xl font-mono outline-none uppercase focus:border-blue-500 transition-all shadow-inner" placeholder="ENTER VIN..." value={sessionForm.vin} onChange={e => setSessionForm({...sessionForm, vin: e.target.value.toUpperCase()})} maxLength={17} />
                </div>
-             </div>
+               
+               <div>
+                 <label className="text-[10px] text-slate-500 font-bold uppercase tracking-widest mb-1 block">Responsible Shop</label>
+                 <select disabled={!!activeSession || isSubmitting} className="w-full bg-slate-950 p-4 rounded-2xl border border-slate-800 focus:border-blue-500 outline-none transition-all shadow-inner" value={sessionForm.shop} onChange={e => setSessionForm({...sessionForm, shop: e.target.value})}>
+                    {SHOPS.map(s => <option key={s}>{s}</option>)}
+                 </select>
+               </div>
 
-             <div>
-               <label className="text-[10px] text-slate-500 font-bold uppercase tracking-widest mb-1 block">Defects Count</label>
-               <input type="number" className="w-full bg-slate-950 p-4 rounded-2xl border border-slate-800 text-xl font-mono outline-none focus:border-blue-500 transition-all shadow-inner" value={sessionForm.defectsCount} onChange={e => setSessionForm({...sessionForm, defectsCount: parseInt(e.target.value) || 0})} />
-             </div>
+               <div>
+                 <label className="text-[10px] text-slate-500 font-bold uppercase tracking-widest mb-1 block">Materials Inventory Log</label>
+                 <div className="bg-slate-800/50 p-6 rounded-3xl border border-slate-700/50 space-y-4 shadow-inner">
+                    <div className="flex gap-2">
+                        <input disabled={isSubmitting} className="flex-1 bg-slate-950 p-3 rounded-xl border border-slate-800 text-sm outline-none focus:border-blue-500" placeholder="Material Name..." value={newMaterial.name} onChange={e => setNewMaterial({...newMaterial, name: e.target.value})} />
+                        <input disabled={isSubmitting} type="number" className="w-20 bg-slate-950 p-3 rounded-xl border border-slate-800 text-center text-sm outline-none focus:border-blue-500" value={newMaterial.qty} onChange={e => setNewMaterial({...newMaterial, qty: parseInt(e.target.value) || 1})} min={1} />
+                        <button disabled={isSubmitting} onClick={() => { if(newMaterial.name) setMaterials([...materials, {...newMaterial}]); setNewMaterial({name:'', qty:1}); }} className="bg-blue-600 px-4 rounded-xl hover:bg-blue-700 transition shadow-lg active:scale-95"><Plus size={18}/></button>
+                    </div>
+                    <div className="space-y-2 max-h-40 overflow-y-auto custom-scrollbar pr-2">
+                      {materials.length === 0 ? (
+                        <p className="text-[10px] text-slate-600 uppercase font-black text-center py-4 italic">No materials logged</p>
+                      ) : materials.map((m, i) => (
+                          <div key={i} className="flex justify-between items-center bg-slate-950/80 p-3 rounded-xl border border-slate-800 group transition-all hover:border-slate-700">
+                              <span className="font-bold text-slate-200">{m.name} <span className="text-blue-500 ml-2 font-mono">x{m.qty}</span></span>
+                              {!activeSession && <button onClick={() => setMaterials(materials.filter((_,idx)=>idx!==i))} className="text-red-500 hover:bg-red-500/10 p-1 rounded-lg transition-colors"><Trash size={16}/></button>}
+                          </div>
+                      ))}
+                    </div>
+                 </div>
+               </div>
 
-             <div>
-               <label className="text-[10px] text-slate-500 font-bold uppercase tracking-widest mb-1 block">Repair Observations</label>
-               <textarea disabled={isSubmitting} className="w-full bg-slate-950 border border-slate-800 rounded-2xl p-4 text-white h-24 outline-none resize-none focus:border-blue-500 transition-all shadow-inner font-medium" value={sessionForm.obs} onChange={e => setSessionForm({...sessionForm, obs: e.target.value})} placeholder="Session notes and findings..." />
-             </div>
-          </div>
+               <div>
+                 <label className="text-[10px] text-slate-500 font-bold uppercase tracking-widest mb-1 block">Defects Count</label>
+                 <input type="number" className="w-full bg-slate-950 p-4 rounded-2xl border border-slate-800 text-xl font-mono outline-none focus:border-blue-500 transition-all shadow-inner" value={sessionForm.defectsCount} onChange={e => setSessionForm({...sessionForm, defectsCount: parseInt(e.target.value) || 0})} />
+               </div>
+
+               <div>
+                 <label className="text-[10px] text-slate-500 font-bold uppercase tracking-widest mb-1 block">Repair Observations</label>
+                 <textarea disabled={isSubmitting} className="w-full bg-slate-950 border border-slate-800 rounded-2xl p-4 text-white h-24 outline-none resize-none focus:border-blue-500 transition-all shadow-inner font-medium" value={sessionForm.obs} onChange={e => setSessionForm({...sessionForm, obs: e.target.value})} placeholder="Session notes and findings..." />
+               </div>
+            </div>
+          )}
           
           <div className="pt-4">
             {!activeSession ? (
               <button 
                 onClick={startRepair} 
-                disabled={isSubmitting || !sessionForm.vin} 
+                disabled={isSubmitting || !sessionForm.vin || activeSessionsList.some(s => s.user === user.fullName)} 
                 className="w-full bg-green-600 hover:bg-green-700 py-5 rounded-[1.5rem] font-black uppercase text-sm tracking-widest shadow-xl shadow-green-500/20 transition-all active:scale-95 flex items-center justify-center gap-3 disabled:opacity-50"
               >
                 {isSubmitting ? <Loader2 className="animate-spin" size={24} /> : <Play fill="currentColor" size={20} />} 
