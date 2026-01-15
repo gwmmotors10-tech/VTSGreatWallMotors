@@ -18,51 +18,54 @@ export default function Reworkers({ user, onBack }: Props) {
   const [activeSessionsList, setActiveSessionsList] = useState<ReworkSession[]>([]);
   const [isSubmitting, setIsSubmitting] = useState(false);
   
-  // Ref to track if we are in the middle of finishing or have just finished
+  // Refs para controle de fluxo e evitar race conditions
   const isFinalizingRef = useRef(false);
   const lastFinishedIdRef = useRef<string | null>(null);
 
   useEffect(() => {
-    const fetch = async () => {
-      // If saving right now, ignore poller to avoid overwriting "clean" local state
+    const fetchData = async () => {
+      // Bloqueia atualização se estivermos no meio de um salvamento
       if (isFinalizingRef.current) return;
 
-      const sess = await db.getReworks();
-      
-      // Filter active sessions (not completed) and ignore the one we just closed
-      const allActive = sess.filter(s => 
-        (s.status === 'IN_PROGRESS' || s.status === 'PAUSED') &&
-        s.id !== lastFinishedIdRef.current
-      );
+      try {
+        const sess = await db.getReworks();
+        
+        // Filtra sessões ativas ignorando a que acabamos de fechar localmente
+        const allActive = sess.filter(s => 
+          (s.status === 'IN_PROGRESS' || s.status === 'PAUSED') &&
+          s.id !== lastFinishedIdRef.current
+        );
 
-      // Look for my active session
-      const myActive = allActive.find(s => s.user === user.fullName);
-      
-      if (myActive) { 
-        setActiveSession(myActive); 
-        // Only update form if not manually editing (to avoid cursor jumps)
-        setSessionForm(prev => ({ 
-          ...prev,
-          vin: myActive.vin, 
-          shop: myActive.shop, 
-          defectsCount: myActive.defectsCount, 
-          obs: myActive.observations 
-        })); 
-        setMaterials(myActive.materials); 
-      } else {
-        // If DB says I have nothing active, and I'm not finalizing, clear state
-        setActiveSession(null);
+        // Busca a minha sessão específica
+        const myActive = allActive.find(s => s.user === user.fullName);
+        
+        if (myActive) { 
+          setActiveSession(myActive); 
+          setSessionForm(prev => ({ 
+            ...prev,
+            vin: myActive.vin, 
+            shop: myActive.shop, 
+            defectsCount: myActive.defectsCount, 
+            obs: myActive.observations 
+          })); 
+          setMaterials(myActive.materials); 
+        } else {
+          // Se o banco não retornou nada ativo para este usuário, limpa a tela
+          setActiveSession(null);
+        }
+        
+        setActiveSessionsList(allActive);
+      } catch (error) {
+        console.error("Fetch error:", error);
       }
-      
-      setActiveSessionsList(allActive);
     };
 
-    fetch();
+    fetchData();
     
-    // Data poller (5s)
-    const poller = setInterval(fetch, 5000);
+    // Poller de dados (Sincroniza com o banco a cada 5 segundos)
+    const poller = setInterval(fetchData, 5000);
     
-    // UI Timer (1s) - Always update to keep the right-side list in real-time
+    // Timer de UI (Atualiza o relógio na tela a cada 1 segundo)
     const timer = setInterval(() => {
       setCurrentTime(Date.now());
     }, 1000);
@@ -82,8 +85,8 @@ export default function Reworkers({ user, onBack }: Props) {
   };
 
   const startRepair = async () => {
-    // Check if the operator already has an active session in the global list
-    if (activeSessionsList.some(s => s.user === user.fullName)) {
+    // Bloqueio: Somente 1 retrabalho por operador
+    if (activeSession || activeSessionsList.some(s => s.user === user.fullName)) {
       alert('You already have an active rework session. Please finish it before starting a new one.');
       return;
     }
@@ -107,7 +110,7 @@ export default function Reworkers({ user, onBack }: Props) {
       
       const createdSess = await db.addRework(sess);
       if (createdSess) {
-        lastFinishedIdRef.current = null; // Reset lock when starting new
+        lastFinishedIdRef.current = null; // Reseta a trava ao iniciar nova
         await db.updateUserStatus(user.username, 'ONLINE');
         setActiveSession(createdSess);
       }
@@ -123,11 +126,11 @@ export default function Reworkers({ user, onBack }: Props) {
     if (!confirm('Finalize and save this rework session?')) return;
 
     const sessionIdToClose = activeSession.id;
-    isFinalizingRef.current = true;
+    isFinalizingRef.current = true; // Ativa trava anti-poller
     setIsSubmitting(true);
 
     try {
-      // 1. Update in Database
+      // 1. Atualiza no Banco de Dados
       await db.updateRework(sessionIdToClose, { 
         status: 'COMPLETED', 
         endTime: new Date().toISOString(),
@@ -135,16 +138,16 @@ export default function Reworkers({ user, onBack }: Props) {
         defectsCount: sessionForm.defectsCount
       });
       
-      // 2. Update User Status
+      // 2. Atualiza status do usuário (Offline)
       await db.updateUserStatus(user.username, 'OFFLINE');
       
-      // 3. History Log
+      // 3. Registra no histórico
       await db.logHistory(activeSession.vin, 'REWORK_FINISH', user.fullName, `Finished repair at ${sessionForm.shop}`, 'REWORKERS');
       
-      // 4. Mark as finished in local lock so poller ignores it
+      // 4. Marca como finalizada na trava de segurança local
       lastFinishedIdRef.current = sessionIdToClose;
 
-      // 5. Clear local state IMMEDIATELY
+      // 5. Limpa os estados locais IMEDIATAMENTE para liberar a tela
       setActiveSession(null);
       setMaterials([]);
       setSessionForm({ vin: '', shop: SHOPS[0], defectsCount: 0, obs: '' });
@@ -155,11 +158,10 @@ export default function Reworkers({ user, onBack }: Props) {
       alert('Failed to finish session. Check connection.');
     } finally {
       setIsSubmitting(false);
-      // Keep isFinalizing as true for a few seconds to ensure next poller cycle
-      // gets the updated database.
+      // Mantém a trava anti-poller por 5 segundos para dar tempo do banco de dados refletir a mudança
       setTimeout(() => {
         isFinalizingRef.current = false;
-      }, 3000);
+      }, 5000);
     }
   };
 
@@ -181,11 +183,11 @@ export default function Reworkers({ user, onBack }: Props) {
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
         <div className="bg-slate-900 p-8 rounded-[2.5rem] border border-slate-800 shadow-2xl space-y-6">
-          {!activeSession && activeSessionsList.some(s => s.user === user.fullName) ? (
-            <div className="bg-red-600/10 border border-red-500/50 p-6 rounded-3xl flex flex-col items-center gap-4 text-center">
-              <AlertCircle size={48} className="text-red-500" />
-              <p className="font-black text-red-500 uppercase tracking-widest">Active session detected in background</p>
-              <p className="text-xs text-slate-400">Waiting for system to synchronize...</p>
+          {!activeSession && isFinalizingRef.current ? (
+            <div className="bg-blue-600/10 border border-blue-500/50 p-10 rounded-3xl flex flex-col items-center gap-4 text-center">
+              <Loader2 size={48} className="text-blue-500 animate-spin" />
+              <p className="font-black text-blue-500 uppercase tracking-widest">Sincronizando Banco de Dados...</p>
+              <p className="text-xs text-slate-400 italic">A tela estará disponível em instantes.</p>
             </div>
           ) : (
             <div className="space-y-4">
@@ -238,7 +240,7 @@ export default function Reworkers({ user, onBack }: Props) {
             {!activeSession ? (
               <button 
                 onClick={startRepair} 
-                disabled={isSubmitting || !sessionForm.vin || activeSessionsList.some(s => s.user === user.fullName)} 
+                disabled={isSubmitting || !sessionForm.vin || isFinalizingRef.current} 
                 className="w-full bg-green-600 hover:bg-green-700 py-5 rounded-[1.5rem] font-black uppercase text-sm tracking-widest shadow-xl shadow-green-500/20 transition-all active:scale-95 flex items-center justify-center gap-3 disabled:opacity-50"
               >
                 {isSubmitting ? <Loader2 className="animate-spin" size={24} /> : <Play fill="currentColor" size={20} />} 
@@ -275,7 +277,9 @@ export default function Reworkers({ user, onBack }: Props) {
                             <div className="text-[9px] text-slate-500 font-black uppercase tracking-widest">{sess.shop}</div>
                         </div>
                         <div className="text-right">
-                           <div className="text-green-500 font-mono font-bold text-lg leading-none">{formatElapsed(sess.startTime)}</div>
+                           <div className="text-green-500 font-mono font-bold text-lg leading-none">
+                             {formatElapsed(sess.startTime)}
+                           </div>
                            <div className="text-[8px] text-slate-600 font-bold uppercase mt-1">Elapsed Time</div>
                         </div>
                     </div>
