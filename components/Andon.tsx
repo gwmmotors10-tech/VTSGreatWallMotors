@@ -41,26 +41,11 @@ export default function Andon({ user, onBack }: Props) {
 
       const textClass = colorTheme === 'green' ? 'neon-green-text' : 'neon-blue-text';
       const borderClass = colorTheme === 'green' ? 'border-green-500 shadow-green-900/30' : 'border-blue-500 shadow-blue-900/30';
-      const metricLabel = line === 'B-Line' ? 'BAIN' : 'PAIN';
-      const metricValue = active ? (line === 'B-Line' ? active.bainCount : active.painCount) : 0;
 
       return (
         <div className={`rounded-[1.5rem] border-2 shadow-2xl bg-slate-900 p-3 flex flex-col h-full ${borderClass} overflow-hidden`}>
-            <div className="flex items-center justify-between mb-1">
-              <div className="flex items-center gap-4">
-                <h3 className={`text-4xl font-black ${textClass} tracking-tighter uppercase leading-tight`}>{line}</h3>
-                <div className="flex items-baseline gap-2">
-                   <span className="text-[12px] font-black text-slate-500 uppercase tracking-widest">{metricLabel}:</span>
-                   <span className="neon-red-text text-5xl font-black italic">{metricValue}</span>
-                </div>
-              </div>
-              {active && active.removedQty > 0 && (
-                <div className="flex items-center gap-2">
-                  <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Adjustments</span>
-                  <span className="neon-red-text text-4xl font-black italic">-{active.removedQty}</span>
-                </div>
-              )}
-            </div>
+            {/* Reduzido o título da linha de 5xl para 4xl */}
+            <h3 className={`text-4xl font-black mb-1 ${textClass} tracking-tighter uppercase leading-tight`}>{line}</h3>
             
             <div className="flex-1 flex flex-col gap-2 min-h-0">
                 <div className="bg-slate-950/50 p-2 rounded-[1.2rem] border border-slate-800 shadow-inner flex flex-col flex-1 min-h-0">
@@ -68,6 +53,7 @@ export default function Andon({ user, onBack }: Props) {
                     {active ? (
                         <div className="flex flex-col flex-1 min-h-0">
                             <div className="flex justify-between items-end border-b border-slate-800 pb-2 mb-3 flex-wrap gap-2">
+                                {/* Aumentado o nome do lote para 8xl e adicionado espaçamento widest, removido o truncate e o max-w */}
                                 <div className={`text-8xl font-black leading-tight tracking-widest ${textClass} flex-1 min-w-[300px]`}>{active.name}</div>
                                 <div className={`text-7xl font-mono font-black ${textClass} leading-none whitespace-nowrap flex items-baseline gap-2`}>
                                   <span>{active.totalQty}</span>
@@ -79,7 +65,9 @@ export default function Andon({ user, onBack }: Props) {
                             <div className="grid grid-cols-3 gap-2 overflow-y-auto flex-1 pr-1 custom-scrollbar">
                                 {Object.entries(active.colors).filter(([_,v]) => (v as number) > 0).map(([k,v]) => (
                                     <div key={k} className="bg-slate-900 p-2 rounded-xl border border-slate-800 flex flex-col items-center justify-center shadow-lg hover:border-slate-700 transition-colors">
+                                        {/* Reduzido o nome da cor para base */}
                                         <span className={`text-base font-black uppercase truncate tracking-tight mb-1 ${textClass}`}>{k}</span>
+                                        {/* Reduzido o valor da cor para 6xl */}
                                         <span className={`text-6xl font-mono font-black ${textClass} leading-none`}>{v as number}</span>
                                     </div>
                                 ))}
@@ -96,6 +84,7 @@ export default function Andon({ user, onBack }: Props) {
                         <div className="flex flex-col gap-3">
                             {upcomingBatches.map((batch, index) => (
                                 <div key={batch.id} className={`flex justify-between items-center px-3 ${index === 0 ? 'border-b border-slate-700/30 pb-2' : ''}`}>
+                                    {/* Nome do próximo lote aumentado para 7xl */}
                                     <div className={`text-7xl font-black truncate max-w-[60%] tracking-widest ${textClass}`}>{batch.name}</div>
                                     <div className={`text-4xl font-mono font-black ${textClass} opacity-70`}>{batch.totalQty} / 30</div>
                                 </div>
