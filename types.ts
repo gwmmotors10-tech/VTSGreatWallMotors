@@ -124,9 +124,6 @@ export interface ProductionBatch {
   name: string;
   line: 'B-Line' | 'P-Line';
   totalQty: number;
-  removedQty: number;
-  bainCount: number;
-  painCount: number;
   models: string[];
   colors: Record<string, number>;
   createdAt: string;
