@@ -74,10 +74,6 @@ export default function KPI({ user, onBack }: Props) {
     await db.incrementBatchQty(batchId, color);
   };
 
-  const handleUpdateLineMetric = async (batchId: string, metric: 'BAIN' | 'PAIN', increment: boolean) => {
-    await db.updateLineMetric(batchId, metric, increment);
-  };
-
   const handleBroadcast = async () => {
     if(!broadcastMsg.trim()) return alert("Enter message.");
     await db.setLineMessage(broadcastLine, broadcastMsg, parseInt(broadcastDuration));
@@ -119,39 +115,11 @@ export default function KPI({ user, onBack }: Props) {
                 const queue = batches.filter(b => b.line === line && b.status === 'UPCOMING')
                                     .sort((a,b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
                 const colorAccent = line === 'B-Line' ? 'text-green-500' : 'text-blue-500';
-                const metricName = line === 'B-Line' ? 'BAIN' : 'PAIN';
-                const metricValue = active ? (line === 'B-Line' ? active.bainCount : active.painCount) : 0;
-
                 return (
                    <div key={line} className={`bg-slate-900 border border-slate-800/50 p-8 rounded-[2.5rem] flex flex-col gap-6 shadow-2xl relative overflow-hidden`}>
                       <div className="absolute top-0 right-0 p-8 text-slate-800 opacity-10 pointer-events-none"><Activity size={100} /></div>
-                      
-                      <div className="flex justify-between items-start z-10">
-                        <div className="flex flex-col gap-1">
-                           <h3 className="text-4xl font-black text-white tracking-tighter uppercase">{line}</h3>
-                           {active && (
-                             <div className="flex items-center gap-4 bg-slate-950/80 p-3 rounded-2xl border border-slate-800 shadow-inner mt-2">
-                               <div className="flex flex-col">
-                                 <span className="text-[10px] font-black text-red-500 uppercase tracking-widest leading-none mb-1">{metricName} Counter</span>
-                                 <span className="text-3xl font-mono font-black text-white leading-none">{metricValue}</span>
-                               </div>
-                               <div className="flex gap-2 ml-4">
-                                  <button 
-                                    onClick={() => handleUpdateLineMetric(active.id, metricName as any, false)}
-                                    className="p-3 bg-red-600/10 text-red-500 rounded-xl hover:bg-red-600 hover:text-white transition-all border border-red-600/20 shadow-lg active:scale-95"
-                                  >
-                                    <Minus size={18} strokeWidth={3} />
-                                  </button>
-                                  <button 
-                                    onClick={() => handleUpdateLineMetric(active.id, metricName as any, true)}
-                                    className="p-3 bg-green-600/10 text-green-500 rounded-xl hover:bg-green-600 hover:text-white transition-all border border-green-600/20 shadow-lg active:scale-95"
-                                  >
-                                    <Plus size={18} strokeWidth={3} />
-                                  </button>
-                               </div>
-                             </div>
-                           )}
-                        </div>
+                      <div className="flex justify-between items-center z-10">
+                        <h3 className="text-4xl font-black text-white tracking-tighter uppercase">{line}</h3>
                         <button onClick={() => { setEditingBatchId(null); setBatchForm({ name:'', line: line as any, models:[], colors:{}, status:'UPCOMING' }); setShowBatchModal(true); }} className="bg-blue-600 p-3 rounded-2xl font-black text-xs uppercase shadow-xl hover:bg-blue-700 transition-all active:scale-95 flex items-center gap-2">
                            <Plus size={20} /> New Batch
                         </button>
@@ -244,7 +212,7 @@ export default function KPI({ user, onBack }: Props) {
           <div className="fixed inset-0 bg-black/95 flex items-center justify-center z-[70] p-4 backdrop-blur-sm">
              <div className="bg-slate-900 border border-slate-700 p-8 rounded-[3rem] w-full max-w-2xl shadow-2xl space-y-6 overflow-y-auto max-h-[90vh] custom-scrollbar">
                 <div className="flex justify-between items-center border-b border-slate-800 pb-4">
-                   <h3 className="text-2xl font-black uppercase text-blue-400 tracking-tighter">{editingBatchId ? 'Edit' : 'Create'} Production Batch</h3>
+                   <h3 className="text-2xl font-black uppercase text-blue-500 tracking-tighter">{editingBatchId ? 'Edit' : 'Create'} Production Batch</h3>
                    <button onClick={() => setShowBatchModal(false)} className="text-slate-500 hover:text-white transition-colors"><X size={32}/></button>
                 </div>
                 <div className="grid grid-cols-2 gap-8">
