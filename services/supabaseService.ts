@@ -172,8 +172,8 @@ class SupabaseService {
   }
 
   async removeSpotFromLane(area: 'BOX_REPAIR' | 'PARKING', lane: string): Promise<void> {
-    const { data = [] } = await this.supabase.from('parking_spots').select('*').eq('area', area).eq('lane', lane).order('number', { ascending: false }).limit(1);
-    if (data && data[0]) {
+    const { data } = await this.supabase.from('parking_spots').select('*').eq('area', area).eq('lane', lane).order('number', { ascending: false }).limit(1);
+    if (data?.[0]) {
       if (data[0].vin) {
           throw new Error("Last spot in lane is not empty.");
       }
@@ -282,7 +282,7 @@ class SupabaseService {
 
   async updateVehicle(vin: string, updates: Partial<Vehicle>): Promise<void> {
     const dbUpdates: any = {};
-    if (updates.vin !== undefined) dbUpdates.vin = updates.vin.trim().toUpperCase();
+    if (updates.vin !== undefined) dbUpdates.vin = updates.vin.trim().toUpperCase(); // Allow VIN update
     if (updates.model !== undefined) dbUpdates.model = updates.model;
     if (updates.color !== undefined) dbUpdates.color = updates.color;
     if (updates.origin !== undefined) dbUpdates.origin = updates.origin;
@@ -296,10 +296,10 @@ class SupabaseService {
   }
 
   async getReworks(): Promise<ReworkSession[]> {
-    const { data: sessions = [] } = await this.supabase.from('rework_sessions').select('*').order('start_time', { ascending: false });
+    const { data: sessions } = await this.supabase.from('rework_sessions').select('*').order('start_time', { ascending: false });
     const results: ReworkSession[] = [];
     for(const s of (sessions || [])) {
-        const { data: mats = [] } = await this.supabase.from('rework_materials').select('*').eq('session_id', s.id);
+        const { data: mats } = await this.supabase.from('rework_materials').select('*').eq('session_id', s.id);
         results.push({ 
           id: s.id.toString(), vin: s.vin, user: s.user_name, startTime: s.start_time, 
           endTime: s.end_time, status: s.status as any, defectsCount: s.defects_count, 
@@ -352,9 +352,6 @@ class SupabaseService {
       }
       return { 
         id: b.id, name: b.name, line: b.line as any, totalQty: b.total_qty, 
-        removedQty: b.removed_qty || 0,
-        bainCount: b.bain_count || 0,
-        painCount: b.pain_count || 0,
         models: b.models, colors: parsedColors, status: b.status as any, 
         createdAt: b.created_at, completedAt: b.completed_at 
       };
@@ -370,7 +367,6 @@ class SupabaseService {
     }
     await this.supabase.from('production_batches').insert({ 
       id: batch.id, name: batch.name, line: batch.line, total_qty: batch.totalQty, 
-      removed_qty: 0, bain_count: 0, pain_count: 0,
       models: batch.models, colors: batch.colors, status: batch.status, created_at: batch.createdAt 
     });
     await this.logHistory(batch.name, 'BATCH_CREATE', user, `Created batch ${batch.name} for ${batch.line}`, 'KPI');
@@ -400,13 +396,10 @@ class SupabaseService {
     if (colors[color] > 0) {
       colors[color]--;
       const newTotal = (Object.values(colors) as number[]).reduce((a, b) => a + b, 0);
-      const newRemoved = (batch.removedQty || 0) + 1;
       const isCompleted = newTotal === 0;
-      
       const updates: any = { 
         colors, 
         total_qty: newTotal, 
-        removed_qty: newRemoved,
         status: isCompleted ? 'COMPLETED' : batch.status 
       };
       if(isCompleted) updates.completed_at = new Date().toISOString();
@@ -435,20 +428,8 @@ class SupabaseService {
     }).eq('id', batchId);
   }
 
-  async updateLineMetric(batchId: string, metric: 'BAIN' | 'PAIN', increment: boolean): Promise<void> {
-    const batches = await this.getBatches();
-    const batch = batches.find(b => b.id === batchId);
-    if (!batch) return;
-    
-    const field = metric === 'BAIN' ? 'bain_count' : 'pain_count';
-    const current = metric === 'BAIN' ? batch.bainCount : batch.painCount;
-    const newValue = increment ? current + 1 : Math.max(0, current - 1);
-    
-    await this.supabase.from('production_batches').update({ [field]: newValue }).eq('id', batchId);
-  }
-
   async getHistory(): Promise<HistoryLog[]> {
-    const { data = [] } = await this.supabase.from('history_logs').select('*').order('date', { ascending: false }).limit(1000);
+    const { data } = await this.supabase.from('history_logs').select('*').order('date', { ascending: false }).limit(1000);
     return (data || []).map(r => ({ 
       id: r.id.toString(), date: r.date, vin: r.vin, action: r.action, 
       user: r.user_name, details: r.details, category: r.category as any 
@@ -460,7 +441,7 @@ class SupabaseService {
   }
 
   async getMessages(): Promise<ChatMessage[]> {
-    const { data = [] } = await this.supabase.from('chat_messages').select('*').order('created_at', { ascending: true }).limit(50);
+    const { data } = await this.supabase.from('chat_messages').select('*').order('created_at', { ascending: true }).limit(50);
     return (data || []).map(r => ({ id: r.id.toString(), userId: r.user_id, userName: r.user_name, userPhoto: r.user_photo, recipientId: r.recipient_id, text: r.text, timestamp: r.created_at }));
   }
 
